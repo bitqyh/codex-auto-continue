@@ -111,15 +111,22 @@
 - **Release 分系统产物（v0.5.0 已实现）**：tag 触发 `.github/workflows/release.yml`，产出 Windows Inno 安装器（内嵌 Python，SignPath Foundation 签名）、Windows 便携 zip、macOS universal dmg（ad-hoc）、SHA256SUMS。
 - **签名决策（2026-10-24）**：Windows 走 SignPath Foundation（免费 OSS 签名，发布者显示 SignPath Foundation）；macOS 不购买 Apple Developer，保持 ad-hoc（未公证，首次右键打开）。Windows 签名需仓库 Secrets：`SIGNPATH_API_TOKEN`/`SIGNPATH_ORGANIZATION_ID`/`SIGNPATH_PROJECT_SLUG`/`SIGNPATH_SIGNING_POLICY_SLUG`/`SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`；未配置时发布 `-unsigned.exe`。
 - **Windows 真机验收结论（2026-10-24）**：报告在交接材料中；68 tests / 2 skipped 通过，8/10 验收项通过，真实续跑仅被 Codex 账号 refresh token 失效阻塞（需用户重新 `codex login` 补一条证据）。
+- **v0.5.0 Release 已发布（2026-10-25）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.5.0
+  - `CodexContinue-Setup-0.5.0-unsigned.exe`（11.1 MB，SignPath 尚未申请/未配置 Secrets，故为 unsigned）
+  - `CodexContinue-0.5.0-win-x64.zip`（11.5 MB，内嵌 Python，pth 已含 `..\src`）
+  - `CodexContinue-0.5.0-macOS.dmg`（1.6 MB，universal arm64+x86_64，ad-hoc 签名）
+  - `SHA256SUMS`；release workflow 在 windows-latest 上通过了安装器静默安装 + `codex-continue --version` 冒烟
+  - 三平台 tests 全绿；`release.yml` 仅在 tag 触发，签名步骤在 `SIGNPATH_API_TOKEN` 缺失时自动跳过并输出 `-unsigned.exe`
 
 ## 5. 接续动作
 
 **下一步（按优先级）**：
 
-1. **Windows 收尾（用户操作）**：重新 `codex login`（若直连失败先把 `HTTPS_PROXY/HTTP_PROXY` 写进用户环境变量，计划任务才会继承）→ 找一条真实因额度中断的线程 `arm` → 验证真实新回合、托盘通知与 `run.log` 里的成功记录。
-2. Windows 睡眠/唤醒实机验证：本机仅支持 S0 现代待机；按 docs/WINDOWS-TESTING.md §4 手动睡眠，确认 `WakeToRun` 唤醒或唤醒后 `StartWhenAvailable` 补跑（需管理员 `powercfg /waketimers` 辅助确认）。
-3. Linux systemd user timer 适配器（可选）。
-4. 可选：`pmset schedule wake` 精准唤醒（需 sudo，合盖/Apple Silicon 有限制）。
+1. **SignPath Foundation（用户操作）**：按 docs/RELEASING.md 申请；通过后在仓库 Secrets 配置 5 个 `SIGNPATH_*`，下一次 tag 即产出签名安装器。
+2. **Windows 收尾（用户操作）**：重新 `codex login`（若直连失败先把 `HTTPS_PROXY/HTTP_PROXY` 写进用户环境变量，计划任务才会继承）→ 找一条真实因额度中断的线程 `arm` → 验证真实新回合、托盘通知与 `run.log` 里的成功记录。
+3. Windows 睡眠/唤醒实机验证：本机仅支持 S0 现代待机；按 docs/WINDOWS-TESTING.md §4 手动睡眠，确认 `WakeToRun` 唤醒或唤醒后 `StartWhenAvailable` 补跑（需管理员 `powercfg /waketimers` 辅助确认）。
+4. Linux systemd user timer 适配器（可选）。
+5. 可选：`pmset schedule wake` 精准唤醒（需 sudo，合盖/Apple Silicon 有限制）。
 5. ~~Release 分系统产物~~（v0.5.0 已实现）：Windows Setup.exe（SignPath，待配置 Secrets）+ 便携 zip、macOS dmg（ad-hoc）、SHA256SUMS；见 docs/RELEASING.md。
 
 **前置条件**：Python 3.9+、Codex 登录有效（同一 `~/.codex`）、可选 Xcode CLT；Windows 建议 Windows 10/11 + 已登录的 Codex CLI/App。

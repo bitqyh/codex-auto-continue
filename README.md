@@ -36,6 +36,8 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 
 校验：`sha256sum -c SHA256SUMS`（Windows 可用 `Get-FileHash` 对照）。
 
+> 当前 v0.5.0 Release 的 Windows 安装器为 `-unsigned.exe`：SignPath Foundation 申请完成并配置仓库 Secrets 后，下一次 tag 会自动发布签名版（流程见 `docs/RELEASING.md`）。
+
 macOS 首次启动若被 Gatekeeper 拦截：
 
 ```bash
