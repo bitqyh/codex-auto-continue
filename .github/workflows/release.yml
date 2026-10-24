@@ -1,0 +1,190 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches repo version
+        id: version
+        run: |
+          version=$(python3 scripts/check_version.py --tag "${GITHUB_REF_NAME}")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "releasing $version"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $failures = 0
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $file = $_.FullName
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors)
+            foreach ($error in $parseErrors) {
+              Write-Error "$file: $($error.Message)"
+              $failures++
+            }
+          }
+          if ($failures -gt 0) { throw "$failures PowerShell parse error(s)" }
+
+      - name: Build portable bundle (embeddable Python)
+        shell: pwsh
+        run: ./scripts/build_windows_bundle.ps1 -Version "${{ needs.version.outputs.version }}"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found" }
+          & $iscc "/DAppVersion=${{ needs.version.outputs.version }}" "installer\codex-auto-continue.iss"
+
+      - name: Upload unsigned installer for SignPath
+        id: upload-unsigned
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: dist/CodexContinue-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Sign installer with SignPath
+        id: signpath
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ secrets.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Finalize Windows assets
+        shell: pwsh
+        run: |
+          ./scripts/finalize_windows_assets.ps1 -Version "${{ needs.version.outputs.version }}" -SignedDir signed
+
+      - name: Verify Authenticode signature
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: pwsh
+        run: |
+          $exe = "dist/CodexContinue-Setup-${{ needs.version.outputs.version }}.exe"
+          if (-not (Test-Path $exe)) { throw "signed installer missing: $exe" }
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found" }
+          & $signtool.FullName verify /pa /v $exe
+
+      - name: Smoke test installer
+        shell: pwsh
+        run: |
+          $version = "${{ needs.version.outputs.version }}"
+          $setup = (Get-ChildItem dist -Filter "CodexContinue-Setup-*.exe" | Select-Object -First 1).FullName
+          $target = Join-Path $env:RUNNER_TEMP "cac-install"
+          if (Test-Path $target) { Remove-Item -Recurse -Force $target }
+          Start-Process -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NOICONS", "/DIR=$target" -Wait
+          $out = & (Join-Path $target "bin\codex-continue.cmd") --version
+          if ("$out".Trim() -notmatch [regex]::Escape($version)) { throw "unexpected version: $out" }
+          Write-Host "installer smoke test ok: $out"
+
+      - name: Upload Windows assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-assets
+          path: |
+            dist/CodexContinue-Setup-*.exe
+            dist/CodexContinue-*-win-x64.zip
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal app and dmg (ad-hoc)
+        run: |
+          chmod +x ui/menubar/build.sh scripts/build_macos_release.sh
+          ./scripts/build_macos_release.sh
+
+      - name: Verify dmg and embedded CLI
+        run: |
+          version="${{ needs.version.outputs.version }}"
+          dmg="dist/CodexContinue-$version-macOS.dmg"
+          test -f "$dmg"
+          codesign --verify --deep --strict "ui/menubar/build/CodexContinue.app"
+          mountpoint=$(mktemp -d)
+          hdiutil attach "$dmg" -nobrowse -mountpoint "$mountpoint" >/dev/null
+          "$mountpoint/CodexContinue.app/Contents/Resources/cli/bin/codex-continue" --version
+          hdiutil detach "$mountpoint" >/dev/null
+
+      - name: Upload macOS assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-assets
+          path: dist/CodexContinue-*-macOS.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          ls -la
+          sha256sum CodexContinue-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          notes=$(cat <<'NOTES'
+          Download the assets below:
+
+          - **Windows installer** (`CodexContinue-Setup-*.exe`) — signed via SignPath Foundation when the signing secrets are configured. If this release only has a `-unsigned.exe`, publishing happened before SignPath approval.
+          - **Windows portable zip** (`CodexContinue-*-win-x64.zip`) — no installer needed; embedded Python; unsigned.
+          - **macOS dmg** (`CodexContinue-*-macOS.dmg`) — ad-hoc signed, **not notarized**. On first launch right-click the app and choose Open (or `xattr -dr com.apple.quarantine /Applications/CodexContinue.app`). Requires Python 3.9+.
+          - **SHA256SUMS** — verify downloads with `sha256sum -c SHA256SUMS`.
+
+          Windows SmartScreen may still warn for a new signing certificate until reputation accumulates.
+          NOTES
+          )
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" dist/* -R "$GITHUB_REPOSITORY" --title "Codex Auto Continue $tag" --notes "$notes"
+          fi

@@ -26,7 +26,26 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 - Windows 10/11：CLI + Task Scheduler 调度 + 托盘 UI（见下文「Windows」）。
 - Linux：CLI 可用，systemd 调度适配器尚未实现。
 
-## 安装
+## 从 Release 安装（最终用户）
+
+| 平台 | 下载 | 说明 |
+| --- | --- | --- |
+| Windows | `CodexContinue-Setup-<ver>.exe` | Inno 安装器，内嵌 Python；SignPath Foundation 签名（未配置签名时为 `-unsigned.exe`） |
+| Windows 便携 | `CodexContinue-<ver>-win-x64.zip` | 解压即用，无需安装；未签名 |
+| macOS | `CodexContinue-<ver>-macOS.dmg` | universal app，**ad-hoc 签名、未公证**；首次启动右键 → 打开 |
+
+校验：`sha256sum -c SHA256SUMS`（Windows 可用 `Get-FileHash` 对照）。
+
+macOS 首次启动若被 Gatekeeper 拦截：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/CodexContinue.app
+```
+
+macOS app 需要系统已安装 Python 3.9+；Windows 安装器/便携包已内嵌 Python。
+
+## 从源码安装
+
 
 ```bash
 git clone https://github.com/bitqyh/codex-auto-continue ~/Projects/gptwork/codex-auto-continue
@@ -215,7 +234,11 @@ ui/menubar/build.sh --install
 
 ## Windows（Windows 10/11）
 
-前置：Python 3.9+、已安装并登录 Codex（Windows 版）、仓库已 clone。
+前置：Python 3.9+、已安装并登录 Codex（Windows 版）。
+
+- **安装器**：下载 `CodexContinue-Setup-<ver>.exe`，双击安装（内嵌 Python，无需额外环境）
+- **便携包**：解压 `CodexContinue-<ver>-win-x64.zip`，双击 `ui\windows-tray\CodexContinueTray.vbs`
+- **源码**：clone 仓库后用 `bin\codex-continue.cmd`（需 Python 3.9+）
 
 ```bat
 cd codex-auto-continue

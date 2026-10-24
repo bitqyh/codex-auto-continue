@@ -7,11 +7,11 @@
 
 - **目标**：Codex 账号额度（usage limit）重置后，自动让被中断的会话继续。
 - **交付形态**：跨平台 CLI（核心，Python 标准库）＋ macOS 原生菜单栏 app ＋ Windows Task Scheduler 调度与 PowerShell 托盘。Codex 插件方向已放弃（2026-10-24 决定），marketplace/插件文件已从仓库移除。
-- **当前版本**：`0.4.3`（`src/codex_auto_continue/__init__.py`）。
+- **当前版本**：`0.5.0`（`src/codex_auto_continue/__init__.py`）。
 - **权威工作目录**：`/Users/qyh/Projects/gptwork/codex-auto-continue`（已部署，菜单栏 app 由此构建）。
 - **开发镜像**：`/Users/qyh/Documents/deepseek-harness/default-workspace/codex-auto-continue`（由权威目录 rsync 同步，排除 `.git` 与构建目录）。
-- **版本控制**：git 仓库，tag `v0.4.2`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
-- **更新时间**：2026-10-24 23:30 CST。本轮完成 Windows 真机验收（Windows 11 22631）：CLI/Task Scheduler/托盘/诊断脚本实机跑通并修复 6 个真机缺陷；真实续跑被 Codex 登录 refresh token 失效阻塞（见 §4/§5）。版本升到 0.4.3（未打 tag/未发布 Release）。
+- **版本控制**：git 仓库，tag `v0.5.0`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
+- **更新时间**：2026-10-25 00:15 CST。Windows 真机验收已通过（68 tests / 2 skipped；真实续跑仅被 Codex 账号登录失效外部阻塞）。本轮实现签名发布流水线：Windows Inno 安装器走 SignPath Foundation（免费）、macOS universal app + ad-hoc dmg、Release 自动构建与校验和；版本 0.5.0。
 
 ## 2. 权威资料
 
@@ -108,7 +108,9 @@
 - `pmset schedule wake` 定时唤醒（可选，需 sudo）。
 - 无新的图标待办；后续如需改变品牌方向再改 SVG／Swift 母版。
 - ~~GitHub 仓库初始化与推送~~（已完成：https://github.com/bitqyh/codex-auto-continue）
-- **Release 分系统产物**：暂缓。用户 2026-10-24 决定等 Windows 真机验收通过后再做；计划为免签方案（Windows 便携 zip = 嵌入 Python + 托盘；macOS `CodexContinue.app` zip = ad-hoc 签名），不购买签名证书。当前 Release 里的 `Source code (zip/tar.gz)` 是 GitHub 自动源码归档，不分系统。
+- **Release 分系统产物（v0.5.0 已实现）**：tag 触发 `.github/workflows/release.yml`，产出 Windows Inno 安装器（内嵌 Python，SignPath Foundation 签名）、Windows 便携 zip、macOS universal dmg（ad-hoc）、SHA256SUMS。
+- **签名决策（2026-10-24）**：Windows 走 SignPath Foundation（免费 OSS 签名，发布者显示 SignPath Foundation）；macOS 不购买 Apple Developer，保持 ad-hoc（未公证，首次右键打开）。Windows 签名需仓库 Secrets：`SIGNPATH_API_TOKEN`/`SIGNPATH_ORGANIZATION_ID`/`SIGNPATH_PROJECT_SLUG`/`SIGNPATH_SIGNING_POLICY_SLUG`/`SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`；未配置时发布 `-unsigned.exe`。
+- **Windows 真机验收结论（2026-10-24）**：报告在交接材料中；68 tests / 2 skipped 通过，8/10 验收项通过，真实续跑仅被 Codex 账号 refresh token 失效阻塞（需用户重新 `codex login` 补一条证据）。
 
 ## 5. 接续动作
 
@@ -118,7 +120,7 @@
 2. Windows 睡眠/唤醒实机验证：本机仅支持 S0 现代待机；按 docs/WINDOWS-TESTING.md §4 手动睡眠，确认 `WakeToRun` 唤醒或唤醒后 `StartWhenAvailable` 补跑（需管理员 `powercfg /waketimers` 辅助确认）。
 3. Linux systemd user timer 适配器（可选）。
 4. 可选：`pmset schedule wake` 精准唤醒（需 sudo，合盖/Apple Silicon 有限制）。
-5. Release 分系统产物（Windows 便携 zip / macOS ad-hoc 签名 app），待 Windows 真实续跑通过后再做。
+5. ~~Release 分系统产物~~（v0.5.0 已实现）：Windows Setup.exe（SignPath，待配置 Secrets）+ 便携 zip、macOS dmg（ad-hoc）、SHA256SUMS；见 docs/RELEASING.md。
 
 **前置条件**：Python 3.9+、Codex 登录有效（同一 `~/.codex`）、可选 Xcode CLT；Windows 建议 Windows 10/11 + 已登录的 Codex CLI/App。
 
@@ -182,6 +184,12 @@ PYTHONPATH=src python3 -m codex_auto_continue disarm --all
 
 # 改完源码后
 ui/menubar/build.sh --install
+
+# 发版构建（不推送，仅本地校验）
+python3 scripts/check_version.py --tag v0.5.0
+./scripts/build_macos_release.sh
+# Windows: pwsh ./scripts/build_windows_bundle.ps1 -Version 0.5.0
+#          ISCC.exe /DAppVersion=0.5.0 installer\codex-auto-continue.iss
 
 # 同步开发镜像（权威目录 → 镜像）
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' --exclude '.git' \

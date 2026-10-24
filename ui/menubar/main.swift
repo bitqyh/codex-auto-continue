@@ -48,9 +48,14 @@ final class CLI {
         if let override = UserDefaults.standard.string(forKey: "cliPath"), FileManager.default.isExecutableFile(atPath: override) {
             return override
         }
-        if let bundled = Bundle.main.object(forInfoDictionaryKey: "CLIPath") as? String,
-           FileManager.default.isExecutableFile(atPath: bundled) {
-            return bundled
+        if let bundled = Bundle.main.object(forInfoDictionaryKey: "CLIPath") as? String {
+            var resolved = bundled
+            if !bundled.hasPrefix("/"), let resources = Bundle.main.resourceURL {
+                resolved = resources.appendingPathComponent(bundled).path
+            }
+            if FileManager.default.isExecutableFile(atPath: resolved) {
+                return resolved
+            }
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let direct = home.appendingPathComponent("Projects/gptwork/codex-auto-continue/bin/codex-continue").path
