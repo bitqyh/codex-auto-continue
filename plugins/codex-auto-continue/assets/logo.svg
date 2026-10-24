@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Codex Auto Continue">
+<title>Codex Auto Continue</title>
+<defs><linearGradient id="tile" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#263A37"/><stop offset="1" stop-color="#101A1B"/></linearGradient></defs>
+<rect x="32" y="32" width="448" height="448" rx="102" fill="url(#tile)"/>
+<rect x="33" y="33" width="446" height="446" rx="101" fill="none" stroke="#FFFFFF" stroke-opacity=".12" stroke-width="2"/><path d="M372.438 353.704 A152 152 0 1 1 392.612 189.367" fill="none" stroke="#7EECC0" stroke-width="38" stroke-linecap="round"/>
+<path d="M354 195 L414 160 Q420 156 419 164 L411 230 Q410 237 406 232 Z" fill="#7EECC0"/>
+<path d="M224 201 Q216 196 216 205 L216 307 Q216 316 224 311 L307 264 Q320 256 307 248 Z" fill="#EDFFF6"/>
+</svg>
