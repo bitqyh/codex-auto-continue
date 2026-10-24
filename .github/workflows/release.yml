@@ -40,7 +40,7 @@ jobs:
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors)
             foreach ($error in $parseErrors) {
-              Write-Error "$file: $($error.Message)"
+              Write-Error "${file}: $($error.Message)"
               $failures++
             }
           }
