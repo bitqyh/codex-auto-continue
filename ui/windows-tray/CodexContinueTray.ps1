@@ -12,7 +12,13 @@ $env:PYTHONIOENCODING = "utf-8"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
-$dataDir = Join-Path $env:APPDATA "codex-auto-continue"
+# Honor CODEX_AUTO_CONTINUE_HOME the same way src/codex_auto_continue/paths.py does, so the
+# tray log and "open run log" follow an isolated data dir instead of always using %APPDATA%.
+if ($env:CODEX_AUTO_CONTINUE_HOME) {
+    $dataDir = $env:CODEX_AUTO_CONTINUE_HOME
+} else {
+    $dataDir = Join-Path $env:APPDATA "codex-auto-continue"
+}
 $logFile = Join-Path $dataDir "tray.log"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
 
@@ -26,13 +32,28 @@ function Write-Log([string]$Message) {
 }
 
 function Invoke-Cli([string[]]$Arguments) {
+    # Windows PowerShell 5.1 turns a native command's stderr into a terminating error while
+    # $ErrorActionPreference is "Stop"; keep the CLI's warnings off the JSON stream instead of
+    # letting them abort the call.
+    $previous = $ErrorActionPreference
+    $errFile = [System.IO.Path]::GetTempFileName()
     try {
-        $text = (& $Cli @Arguments 2>&1 | Out-String)
+        $ErrorActionPreference = "Continue"
+        $text = (& $Cli @Arguments 2> $errFile | Out-String)
         $code = $LASTEXITCODE
+        $errText = (Get-Content -Path $errFile -Raw -ErrorAction SilentlyContinue)
+        if ($errText) { $errText = $errText.Trim() }
+        if ($code -ne 0) {
+            Write-Log ("cli exit {0}: {1}" -f $code, $errText)
+            if (-not $text.Trim() -and $errText) { $text = $errText }
+        }
         return [pscustomobject]@{ Text = $text; Code = $code }
     } catch {
         Write-Log "cli error: $_"
         return [pscustomobject]@{ Text = "$_"; Code = -1 }
+    } finally {
+        $ErrorActionPreference = $previous
+        Remove-Item -Path $errFile -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -52,12 +73,21 @@ function Format-Time([string]$Iso) {
 
 # ---- single instance -------------------------------------------------
 $mutex = New-Object System.Threading.Mutex($false, "CodexContinueTray")
-if (-not $mutex.WaitOne(0)) { exit 0 }
+$owned = $false
+try {
+    $owned = $mutex.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+    # A previous tray died while holding the mutex; we now own it.
+    $owned = $true
+}
+if (-not $owned) { exit 0 }
+Write-Log ("tray started (pid {0}, PowerShell {1})" -f $PID, $PSVersionTable.PSVersion)
 
 # ---- state -----------------------------------------------------------
 $script:Status = $null
 $script:Scan = $null
 $script:Refreshing = $false
+$script:PendingRebuild = $false
 
 $script:DefaultMessage = "上一轮因 usage limit 中断。请从中断处继续未完成的工作，完成后简要汇报结果和未完成项；不要重复已完成的部分。"
 
@@ -164,17 +194,25 @@ function Get-StartupShortcut { Join-Path ([Environment]::GetFolderPath("Startup"
 function Test-Startup { Test-Path (Get-StartupShortcut) }
 function Set-Startup([bool]$Enabled) {
     $link = Get-StartupShortcut
-    if ($Enabled) {
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($link)
-        $shortcut.TargetPath = "powershell.exe"
-        $shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
-        $shortcut.WorkingDirectory = $repoRoot
-        $shortcut.Save()
-        Show-Balloon "已启用开机自启" "Codex Auto Continue"
-    } else {
-        Remove-Item $link -ErrorAction SilentlyContinue
-        Show-Balloon "已关闭开机自启" "Codex Auto Continue"
+    try {
+        if ($Enabled) {
+            $shell = New-Object -ComObject WScript.Shell
+            $shortcut = $shell.CreateShortcut($link)
+            $shortcut.TargetPath = "powershell.exe"
+            $shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
+            $shortcut.WorkingDirectory = $repoRoot
+            $shortcut.Save()
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+            Show-Balloon "已启用开机自启" "Codex Auto Continue"
+        } else {
+            if (Test-Path $link) { Remove-Item $link -Force -ErrorAction Stop }
+            Show-Balloon "已关闭开机自启" "Codex Auto Continue"
+        }
+    } catch {
+        # Don't let a failed shortcut write kill the tray's UI thread silently.
+        Write-Log ("startup toggle failed (enabled=" + $Enabled + "): " + $_.Exception.Message)
+        Show-Balloon "开机自启设置失败" ("无法更新启动文件夹：" + $_.Exception.Message)
+        return
     }
     Update-Data
 }
@@ -204,11 +242,15 @@ function Build-Menu {
             $parts += $part
         }
         $quotaText = "额度：" + ($parts -join "  ")
+    } elseif ($script:Refreshing -and -not $script:Status) {
+        $quotaText = "额度：刷新中…"
     }
     Add-Disabled $quotaText
 
     $pending = @(Get-Pending)
-    if ($pending.Count -gt 0) {
+    if ($script:Refreshing -and -not $script:Status) {
+        Add-Disabled "待续跑：刷新中…"
+    } elseif ($pending.Count -gt 0) {
         $first = $pending | Select-Object -First 1
         $when = if ($first.fire_at) { Format-Time $first.fire_at } else { "—" }
         Add-Disabled ("待续跑：{0} 个 · 下次 {1}" -f $pending.Count, $when)
@@ -268,11 +310,17 @@ function Build-Menu {
     $log = New-MenuItem "打开运行日志"
     $log.add_Click({
         param($sender, $eventArgs)
-        $dir = $env:APPDATA
+        $dir = $dataDir
         if ($script:Status -and $script:Status.data_dir) { $dir = $script:Status.data_dir }
         $path = Join-Path $dir "run.log"
-        if (-not (Test-Path $path)) { New-Item -ItemType File -Path $path -Force | Out-Null }
-        Start-Process notepad.exe $path
+        try {
+            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+            if (-not (Test-Path $path)) { New-Item -ItemType File -Path $path -Force | Out-Null }
+            Start-Process notepad.exe $path
+        } catch {
+            Write-Log ("open run.log failed: " + $_.Exception.Message)
+            Show-Balloon "打开运行日志失败" ("无法打开：" + $path)
+        }
     })
     [void]$menu.Items.Add($log)
 
@@ -289,6 +337,14 @@ function Build-Menu {
     $quit = New-MenuItem "退出 Codex Auto Continue"
     $quit.add_Click({
         param($sender, $eventArgs)
+        try { if ($script:RefreshTimer) { $script:RefreshTimer.Stop() } } catch {}
+        try {
+            if ($script:RefreshJob) {
+                Stop-Job -Job $script:RefreshJob -ErrorAction SilentlyContinue
+                Remove-Job -Job $script:RefreshJob -Force -ErrorAction SilentlyContinue
+                $script:RefreshJob = $null
+            }
+        } catch {}
         $notify.Visible = $false
         $notify.Dispose()
         [System.Windows.Forms.Application]::Exit()
@@ -299,42 +355,125 @@ function Build-Menu {
 function Update-Tray {
     $pending = @(Get-Pending).Count
     $interrupted = @(Get-Interrupted).Count
+    # Chinese tooltip, matching ui/windows-tray/README.md and the macOS menu bar app.
     $text = "Codex Auto Continue"
-    if ($pending -gt 0) { $text = "Codex Auto Continue - $pending pending" }
-    elseif ($interrupted -gt 0) { $text = "Codex Auto Continue - $interrupted interrupted" }
+    if ($pending -gt 0) {
+        $next = @(Get-Pending) | Select-Object -First 1
+        if ($next -and $next.fire_at) {
+            $text = "已安排 {0} 个 · 下次 {1}" -f $pending, (Format-Time $next.fire_at)
+        } else {
+            $text = "已安排 {0} 个" -f $pending
+        }
+    } elseif ($interrupted -gt 0) {
+        $text = "{0} 个中断" -f $interrupted
+    }
     if ($text.Length -gt 63) { $text = $text.Substring(0, 63) }
     $notify.Text = $text
+    # Never rebuild the item list under an open drop-down; defer it to the next Opening.
+    if ($script:RefreshTimer -and $menu.Visible) {
+        $script:PendingRebuild = $true
+        return
+    }
+    $script:PendingRebuild = $false
     Build-Menu
 }
 
-function Update-Data {
+# ---- asynchronous data refresh ---------------------------------------
+# status/scan can take many seconds (quota lookup starts the Codex app-server, up to 30s),
+# so they must never run on the WinForms UI thread: the menu would freeze while opening.
+# Start-Job runs them in a child PowerShell process; a 750ms UI timer picks the result up
+# and rebuilds the menu on the UI thread from the cached snapshot meanwhile.
+$script:RefreshJob = $null
+$script:RefreshTimer = $null
+$script:LastRefreshError = $null
+
+function Start-Refresh {
     if ($script:Refreshing) { return }
     $script:Refreshing = $true
+    $script:LastRefreshError = $null
+    $statusArgs = @("status", "--json")
+    $scanArgs = @("scan", "--days", "14", "--json")
     try {
-        $script:Status = Get-CliJson @("status", "--json")
-        $script:Scan = Get-CliJson @("scan", "--days", "14", "--json")
+        $script:RefreshJob = Start-Job -ArgumentList $Cli, $statusArgs, $scanArgs -ScriptBlock {
+            param($cli, $statusArgs, $scanArgs)
+            $statusText = ""
+            $scanText = ""
+            try { $statusText = (& $cli @statusArgs 2> $null | Out-String) } catch { $statusText = "" }
+            try { $scanText = (& $cli @scanArgs 2> $null | Out-String) } catch { $scanText = "" }
+            [pscustomobject]@{ Status = $statusText; Scan = $scanText }
+        }
     } catch {
-        Write-Log "refresh error: $_"
-    } finally {
+        Write-Log "refresh start failed: $_"
         $script:Refreshing = $false
+        return
     }
+    if ($script:RefreshTimer) { $script:RefreshTimer.Start() }
+}
+
+function Complete-Refresh {
+    if (-not $script:RefreshJob) { $script:Refreshing = $false; return }
+    if ($script:RefreshTimer) { $script:RefreshTimer.Stop() }
+    $result = $null
+    try {
+        $result = Receive-Job -Job $script:RefreshJob -ErrorAction SilentlyContinue
+    } catch {
+        Write-Log "refresh receive failed: $($_.Exception.Message)"
+    }
+    $script:RefreshJob | Remove-Job -Force -ErrorAction SilentlyContinue
+    $script:RefreshJob = $null
+
+    $first = @($result) | Select-Object -First 1
+    if ($first -and $first.Status) {
+        try {
+            $script:Status = $first.Status | ConvertFrom-Json
+        } catch {
+            $script:LastRefreshError = "status json"
+            Write-Log ("bad status json: " + $_.Exception.Message)
+        }
+        try {
+            if ($first.Scan) { $script:Scan = $first.Scan | ConvertFrom-Json }
+        } catch {
+            $script:LastRefreshError = "scan json"
+            Write-Log ("bad scan json: " + $_.Exception.Message)
+        }
+    } else {
+        $script:LastRefreshError = "no data"
+        Write-Log "refresh job produced no data"
+    }
+    $script:Refreshing = $false
     Update-Tray
 }
 
+function Update-Data {
+    # kept as an alias: refresh is always asynchronous now
+    Start-Refresh
+}
+
+$script:RefreshTimer = New-Object System.Windows.Forms.Timer
+$script:RefreshTimer.Interval = 750
+$script:RefreshTimer.add_Tick({
+    if (-not $script:RefreshJob) { $script:RefreshTimer.Stop(); $script:Refreshing = $false; return }
+    if ($script:RefreshJob.State -eq "Running" -or $script:RefreshJob.State -eq "NotStarted") { return }
+    try { Complete-Refresh } catch { Write-Log "refresh tick error: $_" }
+})
+
 $menu.add_Opening({
-    try { Update-Data } catch { Write-Log "menu opening error: $_" }
+    # Rebuild immediately from the cached snapshot; refresh runs in the background.
+    try { Update-Tray } catch { Write-Log "menu opening error: $_" }
+    try { Start-Refresh } catch { Write-Log "menu refresh error: $_" }
 })
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 60000
-$timer.add_Tick({ try { Update-Data } catch { Write-Log "timer error: $_" } })
+$timer.add_Tick({ try { Start-Refresh } catch { Write-Log "timer error: $_" } })
 $timer.Start()
 
 $initial = New-Object System.Windows.Forms.Timer
 $initial.Interval = 1000
 $initial.add_Tick({
     $initial.Stop()
-    try { Update-Data } catch { Write-Log "initial refresh error: $_" }
+    try { Update-Tray } catch { Write-Log "initial refresh error: $_" }
+    try { Start-Refresh } catch { Write-Log "initial refresh error: $_" }
 })
 $initial.Start()
 

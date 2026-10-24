@@ -7,11 +7,11 @@
 
 - **目标**：Codex 账号额度（usage limit）重置后，自动让被中断的会话继续。
 - **交付形态**：跨平台 CLI（核心，Python 标准库）＋ macOS 原生菜单栏 app ＋ Windows Task Scheduler 调度与 PowerShell 托盘。Codex 插件方向已放弃（2026-10-24 决定），marketplace/插件文件已从仓库移除。
-- **当前版本**：`0.4.2`（`src/codex_auto_continue/__init__.py`）。
+- **当前版本**：`0.4.3`（`src/codex_auto_continue/__init__.py`）。
 - **权威工作目录**：`/Users/qyh/Projects/gptwork/codex-auto-continue`（已部署，菜单栏 app 由此构建）。
 - **开发镜像**：`/Users/qyh/Documents/deepseek-harness/default-workspace/codex-auto-continue`（由权威目录 rsync 同步，排除 `.git` 与构建目录）。
 - **版本控制**：git 仓库，tag `v0.4.2`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
-- **更新时间**：2026-10-24 16:05 CST。本轮实现 Windows 调度 + 托盘并发布 v0.4.2（菜单栏单实例 + 登录项重复启动修复）。
+- **更新时间**：2026-10-24 23:30 CST。本轮完成 Windows 真机验收（Windows 11 22631）：CLI/Task Scheduler/托盘/诊断脚本实机跑通并修复 6 个真机缺陷；真实续跑被 Codex 登录 refresh token 失效阻塞（见 §4/§5）。版本升到 0.4.3（未打 tag/未发布 Release）。
 
 ## 2. 权威资料
 
@@ -55,7 +55,15 @@
 
 ### 限制与已知坑
 
-- 自动调度只有 macOS（launchd）；Linux/Windows 适配器是明确报错的占位（`scheduler/systemd.py`、`scheduler/windows.py`）。
+- 自动调度：macOS launchd 已完整验证；Windows Task Scheduler 已真机验证（v0.4.3）；Linux systemd 仍是明确报错的占位（`scheduler/systemd.py`）。
+- **Windows 真机适配（本轮发现）**：
+  - `codex queue` 只有 Codex App 提供，纯 CLI（codex-cli 0.119）没有；runner 自动检测（`codex queue --help` 是否含 `--thread/--message`），不支持时跳过 queue 直接回退 `codex exec ... resume`；新版 CLI 用 `--sandbox workspace-write`，旧版仍用 `--approve-for-me`。
+  - Codex App 的 CLI 不在 PATH（本机在 `%USERPROFILE%\.codex\.sandbox-bin\codex.exe`）；`usage.find_codex` 增加 Windows 候选路径探测，仍可用 `config --set codex_path=...` 覆盖。
+  - 当前 CLI 的 app-server 不接受 `--stdio`（exit 2），`usage` 改为先探测帮助再选择 `app-server` 或 `app-server --stdio`。
+  - 计划任务经 `bin\codex-continue-hidden.vbs` 无窗口启动；VBS 必须显式用 `cmd.exe /d /c` 启动 `.cmd`，否则 Task Scheduler 环境会弹「打开文件 - 安全警告」并永久挂起计划任务（本轮真机复现并修复）。
+  - 本机 Codex 登录 refresh token 已失效（401 `refresh_token_reused`），`usage`/`resume` 都会在鉴权层失败；需要用户重新 `codex login`。直连 OpenAI 被 DNS 污染，代理（如 `127.0.0.1:7890`）需写入用户环境变量 `HTTPS_PROXY/HTTP_PROXY` 后重新登录，计划任务才能继承。
+  - Windows `state_*.sqlite` 的 `threads` 表没有 `name` 列时（0.119 只有 `title`），标题解析改为按实际列自适应。
+  - `schtasks` 输出本地化（中文「下次运行时间」）与代码页问题：`describe` 兼容中英文标签并用任务 XML 兜底，`schtasks` 输出按系统代码页解码。
 - 需要 **Python 3.9+**；菜单栏重编译需要 Xcode 命令行工具（`swiftc`）。
 - 关机/断电期间错过的任务**不会**在下次开机补跑（用户明确不要）。
 - macOS TCC：launchd 任务不能访问 `~/Documents`；脚本与数据必须在 `~/Library/Application Support`。
@@ -77,12 +85,24 @@
   - `queue accepted and a new turn started (App visible)`
   - `all armed threads finished; removing scheduler job`
 - 当前无已安排任务：`~/Library/LaunchAgents` 无 `codex-auto-continue*`；`state.json` 中唯一线程状态 `done`。
-- **Windows（v0.4.0，待真机验证）**：`scheduler/windows.py` 用 `schtasks /Create /XML` 注册 `CodexAutoContinue` 任务（`WakeToRun`、`StartWhenAvailable`、`InteractiveToken`）；托盘为 PowerShell + WinForms（`ui/windows-tray`），功能对齐 macOS 菜单栏；`bin/codex-continue.cmd` 为 Windows 启动器；Windows PID 存活检测、`.cmd` codex 路径、PowerShell Toast 已加；CI 增加三平台矩阵。**尚未在实体 Windows 上跑过**。
+- **Windows（v0.4.3，真机验证完成）**：`scheduler/windows.py` 用 `schtasks /Create /XML` 注册 `CodexAutoContinue` 任务（`WakeToRun`、`StartWhenAvailable`、`InteractiveToken`）；托盘为 PowerShell + WinForms（`ui/windows-tray`），功能对齐 macOS 菜单栏；`bin/codex-continue.cmd` 为 Windows 启动器；Windows PID 存活检测、`.cmd` codex 路径、PowerShell Toast 已加；CI 增加三平台矩阵。**已在实体 Windows 11 上跑通，详见下方本轮验收条目**。
 - 原交接时记录有 2 个因额度中断、**未安排**的会话（本轮未重新扫描，不能当作实时列表）：`分析题目解法思路`、`查找隔空手势操作电脑的方法`（随时可用 `arm`）。
+
+- **Windows 真机验收（2026-10-24，Windows 11 22631 实机，v0.4.3 工作树）**：
+  - 环境：Python 3.12.6（PATH 另有 Anaconda）、未安装 PowerShell 7（使用 Windows PowerShell 5.1）、codex-cli 0.119.0-alpha.11（位于 `%USERPROFILE%\.codex\.sandbox-bin\codex.exe`，不在 PATH）、无 Codex App。
+  - CLI：`bin\codex-continue.cmd --version` → 0.4.3；`scan --days 3650` 读到 2 个真实 rollout（均非中断）；`status` 正常；`usage` 在修复 app-server 参数后能启动 RPC，但因账号 refresh token 失效返回 quota null（预期失败）。
+  - Task Scheduler：`arm --force <thread> --at HH:mm` 成功创建 `CodexAutoContinue`；注册 XML 含 `WakeToRun`/`StartWhenAvailable`；CIM 读取确认 `WakeToRun=True`、`StartWhenAvailable=True`、Run As User=当前用户、InteractiveToken、LeastPrivilege；`status --json` 显示下次触发时间；`schtasks /Run` 与**到点自动触发**都实际执行 runner，`run.log` 出现 `quota unavailable ... continuing without quota gate`、线程 superseded、`all armed threads finished; removing scheduler job`，任务随后自动删除。
+  - VBS：修复「打开文件 - 安全警告」挂起后，计划任务真实运行并写下 run.log。
+  - 续跑链路：构造临时 `CODEX_HOME`（真实 rollout 副本 + 在用的登录态）验证 queue 不支持→跳过→`codex exec --sandbox workspace-write --skip-git-repo-check -o ... resume` 调用真实 CLI，到达网络/鉴权层后因 `401 refresh_token_reused` 失败；`attempts=1`、`last_error` 完整写入 state 与 run.log。真实新回合未能产生，原因是账号登录失效，不是代码。
+  - 诊断脚本：`scripts\windows-diagnostics.ps1` 实机跑通；修复了 PS 5.1 解析、UTF-16 XML/UTF-8 日志读取、codex 定位等问题。
+  - 单元测试：Windows 上 `python -m unittest discover -s tests` → **68 个通过（2 skipped）**，新增 Windows 回归用例 14 个。
+  - 托盘：13 项菜单实机观测（真实 %APPDATA% + 隔离数据）；`CodexContinueTray.vbs` 的 UTF-8 BOM 导致 WSH「无效字符」→ 改 ASCII 后静默启动通过；开机自启快捷方式创建/删除通过；PS 5.1 下 CLI stderr 中断 JSON、mutex abandoned、日志目录/「打开运行日志」路径、中文 tooltip 均修复；数据刷新改异步（`Start-Job` + 750ms Timer），菜单打开 **23.66s → 0.13s**；arm/自定义消息/编辑/取消未逐项点击（本机无法真实续跑，沙箱内子菜单不可稳定展开）。
 
 ### 未做 / 未验证
 
-- **Windows 真机验证**：用户 2026-10-24 决定在 Windows 上装 DSH 自行调试；材料见仓库 `docs/WINDOWS-TESTING.md` 与 `scripts/windows-diagnostics.ps1`（登录 Codex → arm → 到点 queue → 托盘/通知 → 任务计划唤醒），由 Windows 侧会话执行并回改。
+- **Windows 真实新回合（未完成）**：本机 Codex 登录 refresh token 已失效（401 `refresh_token_reused`）；需用户 `codex login`（必要时先写入代理用户环境变量）后重跑 `arm` 才能产生真实新回合。代码链路已验证到鉴权层，queue 跳过/resume 参数/日志均正确。
+- **Windows 睡眠/唤醒实机测试（未做）**：本机仅支持 S0 现代待机，`powercfg /waketimers` 需要管理员权限；已验证任务 XML 与 CIM 的 `WakeToRun=true`、`StartWhenAvailable=true`，但未实际让机器进入睡眠（避免打断当前会话）。需要时可按 docs/WINDOWS-TESTING.md §4 由用户手动睡眠验证。
+- **Windows 托盘**：本轮已实机验证并修复（13 项菜单观测、VBS 静默启动、开机自启、异步刷新 23.66s→0.13s 等，见 §4）；`arm/自定义消息/编辑消息/取消续跑` 未逐项点击（本机无法真实续跑，沙箱内子菜单不可稳定展开）；已知限制：PS 5.1 原生参数引号会破坏含 ASCII 双引号的自定义消息（默认中文消息不受影响）。
 - Linux systemd user timer 适配器。
 - 自动扫描全部中断线程 + 项目白名单模式。
 - `pmset schedule wake` 定时唤醒（可选，需 sudo）。
@@ -94,23 +114,35 @@
 
 **下一步（按优先级）**：
 
-1. Windows/macOS 通用化：按已确认的 win/mac 目标，先补 Task Scheduler 适配器，再做 Windows 托盘（复用 CLI 的 `--json` 接口）；Linux systemd 单独后续处理。本轮尚未实现。
-2. Linux systemd user timer 适配器（可选）。
-3. 可选：`pmset schedule wake` 精准唤醒（需 sudo，合盖/Apple Silicon 有限制）。
+1. **Windows 收尾（用户操作）**：重新 `codex login`（若直连失败先把 `HTTPS_PROXY/HTTP_PROXY` 写进用户环境变量，计划任务才会继承）→ 找一条真实因额度中断的线程 `arm` → 验证真实新回合、托盘通知与 `run.log` 里的成功记录。
+2. Windows 睡眠/唤醒实机验证：本机仅支持 S0 现代待机；按 docs/WINDOWS-TESTING.md §4 手动睡眠，确认 `WakeToRun` 唤醒或唤醒后 `StartWhenAvailable` 补跑（需管理员 `powercfg /waketimers` 辅助确认）。
+3. Linux systemd user timer 适配器（可选）。
+4. 可选：`pmset schedule wake` 精准唤醒（需 sudo，合盖/Apple Silicon 有限制）。
+5. Release 分系统产物（Windows 便携 zip / macOS ad-hoc 签名 app），待 Windows 真实续跑通过后再做。
 
-**前置条件**：Python 3.9+、已登录 Codex（同一 `~/.codex`）、可选 Xcode CLT。
+**前置条件**：Python 3.9+、Codex 登录有效（同一 `~/.codex`）、可选 Xcode CLT；Windows 建议 Windows 10/11 + 已登录的 Codex CLI/App。
 
 **验收方法**：
 
 ```bash
 cd /Users/qyh/Projects/gptwork/codex-auto-continue
-PYTHONPATH=src python3 -m unittest discover -s tests          # 48 pass
+PYTHONPATH=src python3 -m unittest discover -s tests          # 68 pass (2 skipped)
 PYTHONPATH=src python3 -m codex_auto_continue status --json    # 正常输出
 PYTHONPATH=src python3 -m codex_auto_continue run --dry-run    # 无副作用
 ui/menubar/build/CodexContinue.app/Contents/MacOS/CodexContinue --ui-selftest  # 菜单结构
 ```
 
-**阻塞项**：无。已知无效路线：不要尝试用 `codex exec resume` 去接 App 正在持有的线程（会报 writer 冲突）。
+```bat
+cd C:\path\to\codex-auto-continue
+bin\codex-continue.cmd --version
+bin\codex-continue.cmd scan --days 3650
+bin\codex-continue.cmd status
+bin\codex-continue.cmd arm --last --message "继续未完成的工作"
+schtasks /Query /TN CodexAutoContinue /V /FO LIST
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-diagnostics.ps1
+```
+
+**阻塞项**：Windows 真实新回合目前被本机 Codex 登录失效阻塞（`401 refresh_token_reused`），需用户重新登录后才能完成最终验收；其余 Windows 验收项已跑通。已知无效路线：不要尝试用 `codex exec resume` 去接 App 正在持有的线程（会报 writer 冲突）；纯 CLI 没有 `codex queue`（Codex App 专属）。
 
 ## 6. 图标已完成（本轮）
 
@@ -131,6 +163,7 @@ ui/menubar/build/CodexContinue.app/Contents/MacOS/CodexContinue --ui-selftest  #
 | 用户确认范围 | 原范围为仅保存材料；本轮用户人工恢复并授权继续开发、重新设计整套图标，选择“交给你，按推荐直接完成”。未新建其他接手任务 |
 | 接手任务编号 | 当前人工恢复对话（编号未核实；未另建任务） |
 | 交接状态 | **已接手**；2026-10-24 15:45 CST 完成插件方向移除、v0.3.0 发布 |
+| Windows 验收 | 2026-10-24 23:30 CST，Windows 11 22631 实机完成 CLI/Task Scheduler/托盘/诊断脚本验收并修复 6 个缺陷，版本 0.4.3；真实新回合待用户重新 `codex login`。证据见 `docs/WINDOWS-TESTING.md` §8 与 `scripts/windows-diagnostics.ps1` 生成的诊断文件。 |
 | 恢复入口 | 新对话中调用 `$project-handoff`，项目根目录 `/Users/qyh/Projects/gptwork/codex-auto-continue`，交接编号 HO-2026-10-24-01 |
 
 ## 8. 常用命令速查

@@ -148,6 +148,60 @@ def _run_codex(args: list[str], cwd: str | None, timeout: float) -> tuple[int, s
         return 127, str(exc)
 
 
+_HELP_CACHE: dict[str, str] = {}
+_QUEUE_SUPPORT_CACHE: dict[str, bool] = {}
+
+
+def _help_output(codex: str, *args: str) -> str:
+    """Return `codex <args...> --help` text (cached); empty when unavailable."""
+    key = "\x00".join((codex, *args))
+    if key in _HELP_CACHE:
+        return _HELP_CACHE[key]
+    code, output = _run_codex([codex, *args, "--help"], None, 20)
+    text = output if code == 0 else ""
+    _HELP_CACHE[key] = text
+    return text
+
+
+def queue_supported(codex: str) -> bool:
+    """Whether this Codex binary provides the App-only `queue` subcommand.
+
+    Recent Codex CLIs treat `codex queue` as an unknown subcommand: they print
+    the generic top-level help and exit 0. Treating that as success made the
+    runner wait the full verification window for a turn that could never start.
+    """
+    if codex in _QUEUE_SUPPORT_CACHE:
+        return _QUEUE_SUPPORT_CACHE[codex]
+    text = _help_output(codex, "queue")
+    supported = "--thread" in text and "--message" in text
+    _QUEUE_SUPPORT_CACHE[codex] = supported
+    return supported
+
+
+def _resume_exec_args(codex: str, last_message: Path, thread: cfg.ArmedThread, message: str) -> list[str]:
+    """Build a `codex exec ... resume` invocation for the installed CLI.
+
+    Older CLIs accepted ``--approve-for-me``; current Codex builds replaced it
+    with the sandbox/approval flags below. Probe `--help` instead of assuming,
+    otherwise an unknown flag makes every fallback resume fail before the model
+    is even contacted.
+    """
+    help_text = _help_output(codex, "exec")
+    args = [codex, "exec"]
+    if "--approve-for-me" in help_text:
+        args.append("--approve-for-me")
+    elif "--sandbox" in help_text:
+        # Non-interactive `codex exec` never prompts; workspace-write is enough
+        # to continue a coding session without granting unrestricted access.
+        args.extend(["--sandbox", "workspace-write"])
+    elif "--full-auto" in help_text:
+        args.append("--full-auto")
+    if "--skip-git-repo-check" in help_text:
+        args.append("--skip-git-repo-check")
+    args.extend(["-o", str(last_message), "resume", thread.thread_id, message])
+    return args
+
+
 def _wait_for_rollout_growth(path: Path, baseline: int, seconds: int) -> bool:
     import os as _os
 
@@ -163,6 +217,8 @@ def _wait_for_rollout_growth(path: Path, baseline: int, seconds: int) -> bool:
 def _send_via_queue(codex: str, thread: cfg.ArmedThread, message: str, verify_seconds: int) -> tuple[bool, str]:
     # `queue` talks to the app server and does not need a working directory;
     # avoiding it keeps the launchd job clear of protected folders (macOS TCC).
+    if not queue_supported(codex):
+        return False, "queue is not supported by this Codex CLI (Codex App only)"
     code, output = _run_codex(
         [codex, "queue", "--thread", thread.thread_id, "--message", message], None, 60
     )
@@ -176,17 +232,7 @@ def _send_via_queue(codex: str, thread: cfg.ArmedThread, message: str, verify_se
 def _send_via_resume(codex: str, thread: cfg.ArmedThread, message: str) -> tuple[bool, str]:
     last_message = paths.data_dir() / f"last-message-{thread.thread_id}.txt"
     code, output = _run_codex(
-        [
-            codex,
-            "exec",
-            "--approve-for-me",
-            "--skip-git-repo-check",
-            "-o",
-            str(last_message),
-            "resume",
-            thread.thread_id,
-            message,
-        ],
+        _resume_exec_args(codex, last_message, thread, message),
         thread.cwd,
         timeout=3600,
     )
@@ -318,11 +364,14 @@ def _run_locked(
             summary["status"] = "idle"
             return summary
 
-        snapshot = None if os.environ.get("CODEX_AUTO_CONTINUE_SKIP_QUOTA") == "1" else usage.snapshot(
-            config.codex_path, force=True
-        )
+        skip_quota = os.environ.get("CODEX_AUTO_CONTINUE_SKIP_QUOTA") == "1"
+        snapshot = None if skip_quota else usage.snapshot(config.codex_path, force=True)
         if snapshot is not None:
             summary["quota_source"] = snapshot.source
+        elif not skip_quota:
+            # Keep a trace in run.log; otherwise a scheduled run that cannot
+            # read quota (broken login / app server) looks like it never ran.
+            cfg.append_log("quota unavailable (Codex app server failed); continuing without quota gate")
 
         if snapshot is not None and not snapshot.has_capacity:
             fire_at = refresh_schedule(state, config, snapshot, scheduler, now=now)
@@ -336,7 +385,9 @@ def _run_locked(
 
         codex = usage.find_codex(config.codex_path)
         if not codex:
-            summary.update(status="error", detail="codex CLI not found")
+            detail = "codex CLI not found (set codex_path or add codex to PATH)"
+            cfg.append_log(f"run aborted: {detail}")
+            summary.update(status="error", detail=detail)
             return summary
         summary["codex"] = codex
 

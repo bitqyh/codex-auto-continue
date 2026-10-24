@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -200,6 +201,61 @@ class QuotaCacheTests(unittest.TestCase):
                     self.assertIsNone(usage.snapshot(max_age=300, read_only=True))
                 self.assertEqual(before, (dashboard.read_bytes(), dashboard.stat().st_mtime_ns))
                 self.assertFalse(usage._cache_path().exists())
+
+
+class FindCodexTests(unittest.TestCase):
+    """The Codex App on Windows keeps its CLI outside PATH."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_windows_candidates_prefer_bundled_cli(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "USERPROFILE": str(self.root),
+                "APPDATA": str(self.root / "roaming"),
+                "LOCALAPPDATA": str(self.root / "local"),
+            },
+            clear=False,
+        ):
+            candidates = usage._windows_codex_candidates()
+        self.assertEqual(candidates[0], self.root / ".codex" / ".sandbox-bin" / "codex.exe")
+        self.assertIn(self.root / "roaming" / "npm" / "codex.cmd", candidates)
+
+    def test_find_codex_discovers_bundled_windows_cli(self) -> None:
+        bundled = self.root / ".codex" / ".sandbox-bin" / "codex.exe"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_text("", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"USERPROFILE": str(self.root)}, clear=False), \
+             mock.patch.object(usage.os, "name", "nt"), \
+             mock.patch.object(usage.shutil, "which", return_value=None):
+            self.assertEqual(usage.find_codex(), str(bundled))
+
+    def test_find_codex_prefers_explicit_config_path(self) -> None:
+        explicit = self.root / "custom-codex.exe"
+        explicit.write_text("", encoding="utf-8")
+        self.assertEqual(usage.find_codex(str(explicit)), str(explicit))
+
+
+class AppServerArgvTests(unittest.TestCase):
+    def test_legacy_cli_gets_stdio_flag(self) -> None:
+        usage._APP_SERVER_ARGV_CACHE.clear()
+        completed = mock.Mock(returncode=0, stdout="Usage: codex app-server --stdio", stderr="")
+        with mock.patch.object(usage.subprocess, "run", return_value=completed):
+            argv = usage._app_server_argv("codex-old")
+        self.assertEqual(argv, ["codex-old", "app-server", "--stdio"])
+
+    def test_modern_cli_runs_stdio_by_default(self) -> None:
+        usage._APP_SERVER_ARGV_CACHE.clear()
+        completed = mock.Mock(returncode=0, stdout="Usage: codex app-server [OPTIONS] [COMMAND]", stderr="")
+        with mock.patch.object(usage.subprocess, "run", return_value=completed):
+            argv = usage._app_server_argv("codex-new")
+        self.assertEqual(argv, ["codex-new", "app-server"])
 
 
 if __name__ == "__main__":

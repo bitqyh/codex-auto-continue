@@ -55,6 +55,15 @@ class ThreadTitleTests(unittest.TestCase):
     def test_missing_database_returns_empty(self) -> None:
         self.assertEqual(threads.load_thread_titles(["nope"]), {})
 
+    def test_supports_modern_state_db_without_name_column(self) -> None:
+        db = self.root / "state_5.sqlite"
+        connection = sqlite3.connect(db)
+        connection.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, cwd TEXT)")
+        connection.execute("INSERT INTO threads (id, title, cwd) VALUES (?, ?, ?)", ("t9", "仅 title 列", "/tmp/z"))
+        connection.commit()
+        connection.close()
+        self.assertEqual(threads.load_thread_titles(["t9"])["t9"], "仅 title 列")
+
     def test_scan_attaches_titles(self) -> None:
         sessions = self.root / "sessions"
         sessions.mkdir()

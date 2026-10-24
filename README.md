@@ -207,7 +207,7 @@ ui/menubar/build.sh --install
 | 菜单栏常驻 | RSS ~37 MB，自身 CPU 0%；每 60 秒刷新一次 |
 | 暖刷新（默认） | ~0.05 秒：直接读额度缓存 |
 | 每次刷新额外开销 | 扫描 rollout ~1.2 秒（python 子进程 ~30 MB），仅当菜单/定时需要时运行 |
-| 冷刷新（每 5 分钟一次） | 5–12 秒，临时拉起 `codex app-server --stdio`（峰值 RSS ~125 MB），随即退出 |
+| 冷刷新（每 5 分钟一次） | 5–12 秒，临时拉起 `codex app-server`（自动适配旧版 `--stdio` 参数；峰值 RSS ~125 MB），随即退出 |
 | 综合 CPU 占用 | 菜单栏运行时约占单核 2–4%（清醒时），合计磁盘 ~0.3 MB |
 | 定时任务 | 只在触发时刻运行一次 runner（python ~30 MB），续跑由 Codex App 执行；本工具没有常驻守护进程 |
 
@@ -227,6 +227,29 @@ bin\codex-continue.cmd disarm --all
 ```
 
 `arm` 会通过 `schtasks` 创建名为 `CodexAutoContinue` 的计划任务（任务带 `WakeToRun`、`StartWhenAvailable`，仅在当前用户登录时运行、不保存密码）；`status` 可查看任务状态，`uninstall` 会删除任务。
+
+### Codex CLI 定位与续跑方式（Windows）
+
+- 先找 `PATH` 里的 `codex`；找不到时依次探测 Codex App 自带的 CLI
+  `%USERPROFILE%\.codex\.sandbox-bin\codex.exe`、`%USERPROFILE%\.codex\bin\codex.exe`、
+  `%APPDATA%\npm\codex.cmd`、`%LOCALAPPDATA%\Programs\Codex\codex.exe`。也可用
+  `bin\codex-continue.cmd config --set codex_path=<路径>` 显式指定。
+- `codex queue` 是 Codex App 的内部命令，纯 CLI（例如 0.119）没有；检测到不支持时会跳过，
+  自动回退到 `codex exec ... resume`，并按 CLI 版本选择 `--sandbox workspace-write`（新版）
+  或 `--approve-for-me`（旧版），无需手工改参数。
+- 续跑需要有效的 Codex 登录：`codex login status` 应返回 `Logged in`；若提示 refresh token
+  失效，先 `codex login` 重新登录，否则额度读取和续跑都会失败。
+- 若直连 OpenAI 失败，请先设置代理再 `arm`，并让计划任务也能继承到代理（计划任务读的是用户
+  环境变量，不是当前终端里的临时变量）：
+  `setx HTTPS_PROXY http://127.0.0.1:7890`、`setx HTTP_PROXY http://127.0.0.1:7890`，
+  之后重新登录并 `arm`。
+- 计划任务通过 `bin\codex-continue-hidden.vbs` 无窗口启动；VBS 内部显式用 `cmd.exe /d /c`
+  启动批处理，避免 Windows 对 `.cmd` 弹「打开文件 - 安全警告」对话框而卡住任务。
+
+> 真机验收（2026-10-24，Windows 11 22631）：`usage/scan/status/arm`、Task Scheduler
+> 创建/定时触发/自动清理、`run.log`、托盘与诊断脚本均已实机验证。该机 Codex 登录的 refresh
+> token 已失效（401 `refresh_token_reused`），因此未能产生真实新回合；queue 跳过与
+> resume 调用链路已用真实 CLI 验证到网络/鉴权层。
 
 ### 托盘界面
 

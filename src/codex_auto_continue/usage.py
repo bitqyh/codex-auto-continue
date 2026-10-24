@@ -92,17 +92,45 @@ class QuotaSnapshot:
         return max(moments)
 
 
+def _windows_codex_candidates() -> list[Path]:
+    """Common install locations for the Codex CLI/App on Windows.
+
+    The Codex App for Windows does not add its bundled CLI to PATH; it ships a
+    full CLI binary under ``%USERPROFILE%\\.codex\\.sandbox-bin\\codex.exe``.
+    npm installs land in ``%APPDATA%\\npm``; standalone installs under
+    ``%LOCALAPPDATA%\\Programs``.
+    """
+    candidates: list[Path] = []
+    home = Path(os.environ["USERPROFILE"]) if os.environ.get("USERPROFILE") else Path.home()
+    candidates.append(home / ".codex" / ".sandbox-bin" / "codex.exe")
+    candidates.append(home / ".codex" / "bin" / "codex.exe")
+    roaming = os.environ.get("APPDATA")
+    if roaming:
+        candidates.append(Path(roaming) / "npm" / "codex.cmd")
+        candidates.append(Path(roaming) / "npm" / "codex.exe")
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates.append(Path(local) / "Programs" / "Codex" / "codex.exe")
+        candidates.append(Path(local) / "Programs" / "codex" / "codex.exe")
+        candidates.append(Path(local) / "Microsoft" / "WindowsApps" / "codex.exe")
+    candidates.append(Path(r"C:\Program Files\Codex\codex.exe"))
+    return candidates
+
+
 def find_codex(config_codex_path: str | None = None) -> str | None:
     if config_codex_path and Path(config_codex_path).exists():
         return config_codex_path
     env = shutil.which("codex")
     if env:
         return env
-    candidates = [
-        Path("/opt/homebrew/bin/codex"),
-        Path("/usr/local/bin/codex"),
-        paths.codex_home() / "packages" / "standalone" / "current" / "codex",
-    ]
+    if os.name == "nt":
+        candidates = _windows_codex_candidates()
+    else:
+        candidates = [
+            Path("/opt/homebrew/bin/codex"),
+            Path("/usr/local/bin/codex"),
+            paths.codex_home() / "packages" / "standalone" / "current" / "codex",
+        ]
     for candidate in candidates:
         if candidate.exists():
             return str(candidate)
@@ -161,9 +189,40 @@ def parse_rate_limits(account: dict[str, Any], limits: dict[str, Any]) -> QuotaS
     return QuotaSnapshot(source="app-server", account_email=email, windows=windows, fetched_at=dt.datetime.now(dt.timezone.utc))
 
 
+_APP_SERVER_ARGV_CACHE: dict[str, list[str]] = {}
+
+
+def _app_server_argv(codex_path: str) -> list[str]:
+    """Pick the app-server invocation the installed Codex CLI understands.
+
+    Older Codex builds only spoke stdio via ``app-server --stdio``; current
+    builds run stdio by default and reject ``--stdio`` with exit code 2 (which
+    made every quota read fail before the RPC even started).
+    """
+    cached = _APP_SERVER_ARGV_CACHE.get(codex_path)
+    if cached is not None:
+        return list(cached)
+    try:
+        result = subprocess.run(
+            [codex_path, "app-server", "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+            check=False,
+        )
+        help_text = (result.stdout or "") + (result.stderr or "")
+    except (OSError, subprocess.SubprocessError):
+        help_text = ""
+    argv = [codex_path, "app-server", "--stdio"] if "--stdio" in help_text else [codex_path, "app-server"]
+    _APP_SERVER_ARGV_CACHE[codex_path] = list(argv)
+    return argv
+
+
 def fetch_from_app_server(codex_path: str, timeout_seconds: float = 30.0) -> QuotaSnapshot:
     process = subprocess.Popen(
-        [codex_path, "app-server", "--stdio"],
+        _app_server_argv(codex_path),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,

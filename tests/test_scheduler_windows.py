@@ -88,7 +88,7 @@ class WindowsSchedulerTests(unittest.TestCase):
         ):
             text = scheduler.describe()
         self.assertIn("installed", text)
-        self.assertIn("Next Run Time", text)
+        self.assertIn("next run 10/25/2026 12:19:00 AM", text)
 
     def test_describe_when_missing(self) -> None:
         scheduler = WindowsScheduler()
@@ -106,6 +106,36 @@ class WindowsSchedulerTests(unittest.TestCase):
         ):
             with self.assertRaises(Exception):
                 scheduler.install_interval(600, [], {}, str(self.root))
+
+
+    def test_describe_accepts_localized_next_run_label(self) -> None:
+        scheduler = WindowsScheduler()
+        output = "TaskName: \\CodexAutoContinue\n下次运行时间: 2026/10/25 0:19:00\n"
+        with mock.patch(
+            "codex_auto_continue.scheduler.windows._run_schtasks",
+            side_effect=self._fake_schtasks(stdout=output),
+        ):
+            text = scheduler.describe()
+        self.assertIn("installed", text)
+        self.assertIn("next run 2026/10/25 0:19:00", text)
+
+    def test_describe_falls_back_to_task_xml(self) -> None:
+        scheduler = WindowsScheduler()
+        self._install(scheduler)
+        with mock.patch(
+            "codex_auto_continue.scheduler.windows._run_schtasks",
+            side_effect=self._fake_schtasks(stdout="TaskName: \\CodexAutoContinue\n"),
+        ):
+            text = scheduler.describe()
+        self.assertIn("installed", text)
+        self.assertIn("next run", text)
+
+    def test_next_run_detail(self) -> None:
+        from codex_auto_continue.scheduler.windows import _next_run_detail
+
+        self.assertEqual(_next_run_detail("Next Run Time: 1/1/2027 1:00:00 AM"), "next run 1/1/2027 1:00:00 AM")
+        self.assertEqual(_next_run_detail("下次运行时间:  2027/1/1 1:00:00"), "next run 2027/1/1 1:00:00")
+        self.assertEqual(_next_run_detail("Status: Ready"), "")
 
 
 if __name__ == "__main__":

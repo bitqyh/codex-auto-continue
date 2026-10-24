@@ -9,3 +9,4 @@ venv/
 data/
 *.log
 .pytest_cache/
+evidence/

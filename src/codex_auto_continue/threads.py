@@ -53,7 +53,19 @@ def load_thread_titles(thread_ids: list[str] | None = None) -> dict[str, str]:
             except sqlite3.Error:
                 continue
             try:
-                rows = connection.execute("SELECT id, name, title, cwd FROM threads").fetchall()
+                columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(threads)").fetchall()
+                }
+                if "id" not in columns:
+                    connection.close()
+                    continue
+                name_expr = "name" if "name" in columns else "NULL"
+                title_expr = "title" if "title" in columns else "NULL"
+                cwd_expr = "cwd" if "cwd" in columns else "NULL"
+                rows = connection.execute(
+                    f"SELECT id, {name_expr}, {title_expr}, {cwd_expr} FROM threads"
+                ).fetchall()
             except sqlite3.Error:
                 connection.close()
                 continue

@@ -24,6 +24,15 @@ args = sys.argv[1:]
 with open(os.environ["FAKE_CALL_LOG"], "a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\n")
 
+if "--help" in args:
+    if args and args[0] == "queue":
+        print("Usage: codex queue --thread <id> --message <text>")
+    else:
+        print("Usage: codex exec [OPTIONS]")
+        print("  --sandbox <SANDBOX_MODE>")
+        print("  --skip-git-repo-check")
+    sys.exit(0)
+
 mode = os.environ.get("FAKE_MODE", "ok")
 if args and args[0] == "queue":
     if mode.startswith("queue_fail"):
@@ -118,8 +127,10 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(outcome["ok"])
         self.assertEqual(thread.status, cfg.STATUS_DONE)
         calls = [json.loads(line) for line in self.call_log.read_text().splitlines()]
-        self.assertEqual(calls[0][0], "queue")
-        self.assertIn("--thread", calls[0])
+        queue_calls = [call for call in calls if "--thread" in call]
+        self.assertEqual(len(queue_calls), 1)
+        self.assertIn("--thread", queue_calls[0])
+        self.assertFalse(any("resume" in call for call in calls))
 
     def test_resume_fallback_when_queue_fails(self) -> None:
         os.environ["FAKE_MODE"] = "queue_fail_resume_ok"
@@ -128,8 +139,49 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(outcome["ok"])
         self.assertEqual(thread.status, cfg.STATUS_DONE)
         calls = [json.loads(line) for line in self.call_log.read_text().splitlines()]
-        self.assertEqual(calls[0][0], "queue")
-        self.assertIn("resume", calls[1])
+        self.assertTrue(any("--thread" in call for call in calls))
+        self.assertTrue(any("resume" in call for call in calls))
+
+    def test_queue_supported_detection(self) -> None:
+        runner._QUEUE_SUPPORT_CACHE.clear()
+        with mock.patch.object(
+            runner, "_run_codex", return_value=(0, "Usage: codex queue --thread <id> --message <text>")
+        ):
+            self.assertTrue(runner.queue_supported("codex-test-with-queue"))
+        with mock.patch.object(runner, "_run_codex", return_value=(0, "Usage: codex [OPTIONS] [PROMPT]")):
+            self.assertFalse(runner.queue_supported("codex-test-without-queue"))
+
+    def test_queue_unsupported_skips_straight_to_resume(self) -> None:
+        runner._QUEUE_SUPPORT_CACHE.clear()
+        with mock.patch.object(runner, "_help_output", side_effect=lambda codex, *args: ""):
+            thread = self._thread()
+            outcome = runner.continue_thread(thread, self.config, str(self.fake))
+        self.assertTrue(outcome["ok"])
+        calls = [json.loads(line) for line in self.call_log.read_text().splitlines()]
+        self.assertFalse(any("--thread" in call for call in calls))
+        self.assertTrue(any("resume" in call for call in calls))
+
+    def test_resume_args_use_legacy_approve_flag_when_supported(self) -> None:
+        with mock.patch.object(
+            runner,
+            "_help_output",
+            return_value="Usage: codex exec --approve-for-me --skip-git-repo-check",
+        ):
+            args = runner._resume_exec_args(str(self.fake), self.home / "last.txt", self._thread(), "继续")
+        self.assertIn("--approve-for-me", args)
+        self.assertIn("--skip-git-repo-check", args)
+        self.assertNotIn("--sandbox", args)
+
+    def test_resume_args_use_sandbox_for_modern_cli(self) -> None:
+        with mock.patch.object(
+            runner,
+            "_help_output",
+            return_value="Usage: codex exec --sandbox <SANDBOX_MODE> --skip-git-repo-check",
+        ):
+            args = runner._resume_exec_args(str(self.fake), self.home / "last.txt", self._thread(), "继续")
+        self.assertIn("--sandbox", args)
+        self.assertIn("workspace-write", args)
+        self.assertNotIn("--approve-for-me", args)
 
     def test_thread_that_moved_on_is_superseded(self) -> None:
         with open(self.rollout, "a", encoding="utf-8") as handle:
@@ -219,6 +271,15 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(scheduler.state, "existing job")
         self.assertEqual(before, {p.name: (p.read_bytes(), p.stat().st_mtime_ns)
                                   for p in (self.home / "data").iterdir()})
+
+
+    def test_run_logs_missing_codex(self) -> None:
+        cfg.save_state(cfg.State(threads={"test-thread": self._thread()}))
+        with mock.patch.object(runner.usage, "find_codex", return_value=None):
+            summary = runner.run(self.config, scheduler=NullScheduler(), notify_results=False)
+        self.assertEqual(summary["status"], "error")
+        log = (self.home / "data" / "run.log").read_text(encoding="utf-8")
+        self.assertIn("codex CLI not found", log)
 
 
 if __name__ == "__main__":

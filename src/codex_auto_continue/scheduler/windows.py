@@ -8,7 +8,9 @@ tasks keep polling until the runner removes the task.
 from __future__ import annotations
 
 import datetime as dt
+import locale
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -20,13 +22,21 @@ from .base import Scheduler, SchedulerError
 TASK_NAME = "CodexAutoContinue"
 
 
+def _console_encoding() -> str:
+    """schtasks writes its (localized) output in the active console code page."""
+    try:
+        return locale.getpreferredencoding(False) or "utf-8"
+    except (LookupError, ValueError):
+        return "utf-8"
+
+
 def _run_schtasks(args: list[str], timeout: float = 60.0) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             ["schtasks", *args],
             capture_output=True,
             text=True,
-            encoding="utf-8",
+            encoding=_console_encoding(),
             errors="replace",
             timeout=timeout,
             check=False,
@@ -37,6 +47,20 @@ def _run_schtasks(args: list[str], timeout: float = 60.0) -> subprocess.Complete
 
 def _quote(value: str) -> str:
     return f'"{value}"'
+
+
+def _next_run_detail(output: str) -> str:
+    """Extract the next run time from `schtasks /Query` output.
+
+    Windows localizes the label (zh-CN: 下次运行时间), so accept the common
+    labels instead of only the English one.
+    """
+    labels = {"next run time", "下次运行时间", "下次執行時間", "next run"}
+    for line in output.splitlines():
+        label, separator, value = line.partition(":")
+        if separator and label.strip().lower() in labels and value.strip():
+            return f"next run {value.strip()}"
+    return ""
 
 
 class WindowsScheduler(Scheduler):
@@ -145,13 +169,20 @@ class WindowsScheduler(Scheduler):
         except OSError:
             pass
 
+    def _xml_start_detail(self) -> str:
+        """Fallback for localized `schtasks` output: read our own task XML."""
+        try:
+            text = self._xml_path().read_text(encoding="utf-16")
+        except (OSError, UnicodeError):
+            return ""
+        match = re.search(r"<StartBoundary>([^<]+)</StartBoundary>", text)
+        if not match:
+            return ""
+        return f"next run {match.group(1).replace('T', ' ')}"
+
     def describe(self) -> str:
         result = _run_schtasks(["/Query", "/TN", self.task_name, "/FO", "LIST"])
         if result.returncode != 0:
             return "task-scheduler: not installed"
-        detail = ""
-        for line in (result.stdout or "").splitlines():
-            if "Next Run Time" in line:
-                detail = line.strip()
-                break
+        detail = _next_run_detail(result.stdout or "") or self._xml_start_detail()
         return f"task-scheduler: installed ({self.task_name})" + (f" · {detail}" if detail else "")
