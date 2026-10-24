@@ -239,6 +239,8 @@ ui\windows-tray\CodexContinueTray.vbs
 
 已知限制：计划任务只在用户登录时运行；关机期间错过的任务不会补跑（与 macOS 设计一致）。
 
+真机验收清单与诊断脚本：`docs/WINDOWS-TESTING.md`、`scripts/windows-diagnostics.ps1`。
+
 ## 睡眠处理
 
 - **睡眠不丢任务**：到点时机算任务是 launchd `StartCalendarInterval`，Mac 在睡时会等**唤醒后补跑**（可能晚于原定时间）。

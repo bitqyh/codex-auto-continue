@@ -82,7 +82,7 @@
 
 ### 未做 / 未验证
 
-- **Windows 真机验证**（用户已有机器，待执行：登录 Codex → arm → 到点 queue → 托盘/通知 → 任务计划是否唤醒）。
+- **Windows 真机验证**：用户 2026-10-24 决定在 Windows 上装 DSH 自行调试；材料见仓库 `docs/WINDOWS-TESTING.md` 与 `scripts/windows-diagnostics.ps1`（登录 Codex → arm → 到点 queue → 托盘/通知 → 任务计划唤醒），由 Windows 侧会话执行并回改。
 - Linux systemd user timer 适配器。
 - 自动扫描全部中断线程 + 项目白名单模式。
 - `pmset schedule wake` 定时唤醒（可选，需 sudo）。
