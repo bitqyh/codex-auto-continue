@@ -214,6 +214,16 @@ def save_state(state: State) -> None:
 def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            # ERROR_ACCESS_DENIED means it exists but belongs to another user.
+            return ctypes.windll.kernel32.GetLastError() == 5
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

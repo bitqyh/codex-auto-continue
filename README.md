@@ -22,7 +22,9 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 
 - Python 3.9+
 - 已登录的 Codex CLI / Codex App（同一个 `~/.codex`）
-- macOS（launchd 适配器已实现）。Linux / Windows 的调度适配器在路线图中，核心逻辑本身跨平台。
+- macOS：完整支持（launchd 调度）。
+- Windows 10/11：CLI + Task Scheduler 调度 + 托盘 UI（见下文「Windows」）。
+- Linux：CLI 可用，systemd 调度适配器尚未实现。
 
 ## 安装
 
@@ -43,6 +45,8 @@ codex-continue --version
 > 说明：Codex 插件方向已放弃（2026-10-24 决定），仓库不再提供 marketplace / 插件；三个入口中的插件入口已移除，保留 CLI 与 macOS 菜单栏。
 
 ## 快速开始
+
+macOS 用 `codex-continue`（或 `./bin/codex-continue`）；Windows 用 `bin\codex-continue.cmd`。
 
 ```bash
 # 1. 看看哪些会话因额度中断
@@ -197,6 +201,7 @@ ui/menubar/build.sh --install
 | 项 | 占用 |
 | --- | --- |
 | 菜单栏 app `~/Applications/CodexContinue.app` | ~200 KB |
+| Windows 托盘（PowerShell 脚本 + 图标） | ~50 KB，常驻 ~50 MB |
 | 数据目录（状态/日志/额度缓存） | ~20 KB，日志按 256 KB × 3 滚动 |
 | 菜单栏常驻 | RSS ~37 MB，自身 CPU 0%；每 60 秒刷新一次 |
 | 暖刷新（默认） | ~0.05 秒：直接读额度缓存 |
@@ -206,6 +211,33 @@ ui/menubar/build.sh --install
 | 定时任务 | 只在触发时刻运行一次 runner（python ~30 MB），续跑由 Codex App 执行；本工具没有常驻守护进程 |
 
 额度缓存可用 `codex-continue config --set quota_cache_seconds=300` 调大，或 `status --refresh` 强制刷新。
+
+## Windows（Windows 10/11）
+
+前置：Python 3.9+、已安装并登录 Codex（Windows 版）、仓库已 clone。
+
+```bat
+cd codex-auto-continue
+bin\codex-continue.cmd usage
+bin\codex-continue.cmd scan
+bin\codex-continue.cmd arm --last --message "继续未完成的工作"
+bin\codex-continue.cmd status
+bin\codex-continue.cmd disarm --all
+```
+
+`arm` 会通过 `schtasks` 创建名为 `CodexAutoContinue` 的计划任务（任务带 `WakeToRun`、`StartWhenAvailable`，仅在当前用户登录时运行、不保存密码）；`status` 可查看任务状态，`uninstall` 会删除任务。
+
+### 托盘界面
+
+```bat
+ui\windows-tray\CodexContinueTray.vbs
+```
+
+- 功能与 macOS 菜单栏一致：额度、待续跑、因额度中断的会话（默认/自定义消息续跑）、已安排任务（编辑消息/取消）、刷新、日志、开机自启
+- 纯 PowerShell + WinForms，无第三方依赖；日志在 `%APPDATA%\codex-auto-continue\tray.log`
+- 开机自启通过当前用户启动文件夹的快捷方式实现，不需要管理员权限
+
+已知限制：计划任务只在用户登录时运行；关机期间错过的任务不会补跑（与 macOS 设计一致）。
 
 ## 睡眠处理
 
@@ -220,17 +252,19 @@ ui/menubar/build.sh --install
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
+GitHub Actions 会在 Ubuntu / macOS / Windows 三平台跑同一套测试（Windows 上的 launchd 用例自动跳过）。
+
 测试包含：rollout 解析、额度 JSON 解析、触发时间计算、状态/锁、以及用假 `codex` 可执行文件跑通的 queue 成功、queue 失败回退 resume、线程已继续等场景。
 
 ## 路线图
 
 - [x] macOS launchd 调度器
 - [ ] Linux systemd user timer 适配器
-- [ ] Windows Task Scheduler 适配器
+- [x] Windows Task Scheduler 适配器（`schtasks` + XML，WakeToRun/StartWhenAvailable）
 - ~~Codex 插件方向~~：2026-10-24 决定放弃，已从仓库移除
 - [ ] 可选的“自动扫描全部中断线程 + 项目白名单”模式
 - [x] macOS 菜单栏 app（`ui/menubar`，原生 AppKit）
-- [ ] Windows 托盘 UI（复用 CLI 的 JSON 接口）
+- [x] Windows 托盘 UI（PowerShell + WinForms，`ui/windows-tray`）
 - [x] 续跑消息自定义：`arm` 交互输入 / `--edit`（$EDITOR）、`template` 按项目保存模板
 - [x] 睡眠处理：launchd 唤醒补跑 + `caffeinate` 保护执行窗口
 - [ ] 可选：陪跑模式（queue 后盯 rollout 期间保持唤醒）

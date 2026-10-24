@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import stat
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,9 +74,16 @@ class RunnerTests(unittest.TestCase):
         self.call_log = self.home / "calls.jsonl"
         os.environ["FAKE_CALL_LOG"] = str(self.call_log)
         os.environ["FAKE_ROLLOUT"] = str(self.rollout)
-        self.fake = self.home / "codex"
-        self.fake.write_text(FAKE_CODEX, encoding="utf-8")
-        self.fake.chmod(self.fake.stat().st_mode | stat.S_IEXEC)
+        script = self.home / "fake_codex.py"
+        script.write_text(FAKE_CODEX, encoding="utf-8")
+        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        if os.name == "nt":
+            self.fake = self.home / "codex.cmd"
+            self.fake.write_text(f'@echo off\r\n"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
+        else:
+            self.fake = self.home / "codex"
+            self.fake.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+            self.fake.chmod(self.fake.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         self.config = cfg.Config(codex_path=str(self.fake), queue_verify_seconds=2, notify_local=False)
 
     def tearDown(self) -> None:

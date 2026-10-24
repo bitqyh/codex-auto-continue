@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import stat
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,11 +34,13 @@ class MessageResolutionTests(unittest.TestCase):
 
     def test_edit_message_uses_editor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            editor = Path(tmp) / "fake_editor.sh"
-            editor.write_text('#!/bin/sh\nprintf "edited text\\n" > "$1"\n', encoding="utf-8")
-            editor.chmod(editor.stat().st_mode | stat.S_IEXEC)
+            editor = Path(tmp) / "fake_editor.py"
+            editor.write_text(
+                "import sys\nfrom pathlib import Path\nPath(sys.argv[1]).write_text('edited text\\n', encoding='utf-8')\n",
+                encoding="utf-8",
+            )
             old = os.environ.get("EDITOR")
-            os.environ["EDITOR"] = str(editor)
+            os.environ["EDITOR"] = f'"{sys.executable}" "{editor}"' 
             try:
                 self.assertEqual(messages.edit_message("原始"), "edited text")
             finally:

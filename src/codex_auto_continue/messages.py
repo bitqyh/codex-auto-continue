@@ -45,6 +45,12 @@ def resolve_message(
     return text
 
 
+def _split_editor(command: str) -> list[str]:
+    if os.name == "nt":
+        return [token.strip('"') for token in shlex.split(command, posix=False)]
+    return shlex.split(command)
+
+
 def edit_message(initial: str) -> str | None:
     """Open $VISUAL/$EDITOR on the message; returns None when unavailable or cancelled."""
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
@@ -55,7 +61,7 @@ def edit_message(initial: str) -> str | None:
     handle.close()
     path = Path(handle.name)
     try:
-        subprocess.run([*shlex.split(editor), str(path)], check=False)
+        subprocess.run([*_split_editor(editor), str(path)], check=False)
         edited = path.read_text(encoding="utf-8").strip()
         return edited or None
     except OSError:

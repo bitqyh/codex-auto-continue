@@ -33,7 +33,25 @@ def _schedule_parts() -> tuple[list[str], dict[str, str], str]:
 
 @contextlib.contextmanager
 def _hold_awake():
-    """Keep the Mac from idle-sleeping while this run is active. No-op elsewhere."""
+    """Keep the machine from idle-sleeping while this run is active."""
+    if os.name == "nt":
+        import ctypes
+
+        es_continuous = 0x80000000
+        es_system_required = 0x00000001
+        try:
+            ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
+        except Exception:  # noqa: BLE001 - keep-awake is best effort
+            pass
+        try:
+            yield
+        finally:
+            try:
+                ctypes.windll.kernel32.SetThreadExecutionState(es_continuous)
+            except Exception:  # noqa: BLE001
+                pass
+        return
+
     process = None
     if sys.platform == "darwin":
         caffeinate = shutil.which("caffeinate")
@@ -109,6 +127,8 @@ def _safe_cwd(cwd: str | None) -> str | None:
 
 
 def _run_codex(args: list[str], cwd: str | None, timeout: float) -> tuple[int, str]:
+    if os.name == "nt" and args and args[0].lower().endswith((".cmd", ".bat")):
+        args = ["cmd.exe", "/c", *args]
     try:
         result = subprocess.run(
             args,

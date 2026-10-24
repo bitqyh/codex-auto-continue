@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from codex_auto_continue import paths
 from codex_auto_continue.scheduler import launchd
 
 
+@unittest.skipUnless(sys.platform == "darwin", "launchd is macOS only")
 class LaunchdTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

@@ -6,12 +6,12 @@
 ## 1. 任务与版本
 
 - **目标**：Codex 账号额度（usage limit）重置后，自动让被中断的会话继续。
-- **交付形态**：跨平台 CLI（核心，Python 标准库）＋ macOS 原生菜单栏 app。Codex 插件方向已放弃（2026-10-24 决定），marketplace/插件文件已从仓库移除。
-- **当前版本**：`0.3.0`（`src/codex_auto_continue/__init__.py`）。
+- **交付形态**：跨平台 CLI（核心，Python 标准库）＋ macOS 原生菜单栏 app ＋ Windows Task Scheduler 调度与 PowerShell 托盘。Codex 插件方向已放弃（2026-10-24 决定），marketplace/插件文件已从仓库移除。
+- **当前版本**：`0.4.0`（`src/codex_auto_continue/__init__.py`）。
 - **权威工作目录**：`/Users/qyh/Projects/gptwork/codex-auto-continue`（已部署，菜单栏 app 由此构建）。
 - **开发镜像**：`/Users/qyh/Documents/deepseek-harness/default-workspace/codex-auto-continue`（由权威目录 rsync 同步，排除 `.git` 与构建目录）。
-- **版本控制**：git 仓库，tag `v0.3.0`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
-- **更新时间**：2026-10-24 15:45 CST。本轮按用户决定移除 Codex 插件方向，发布 v0.3.0。
+- **版本控制**：git 仓库，tag `v0.4.0`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
+- **更新时间**：2026-10-24 16:05 CST。本轮实现 Windows 调度 + 托盘并发布 v0.4.0。
 
 ## 2. 权威资料
 
@@ -19,7 +19,10 @@
 | --- | --- | --- |
 | 用户说明 | `README.md` | 安装、命令、配置、资源占用 |
 | 实现 | `src/codex_auto_continue/` | 全部逻辑（唯一源码权威） |
-| 仓库内 CLI 启动器 | `bin/codex-continue` | 把 `src/` 加入 PYTHONPATH 后运行 CLI |
+| 仓库内 CLI 启动器 | `bin/codex-continue`（POSIX）、`bin/codex-continue.cmd`（Windows）、`bin/codex-continue-hidden.vbs`（无窗口） | 把 `src/` 加入 PYTHONPATH 后运行 CLI |
+| Windows 调度 | `src/codex_auto_continue/scheduler/windows.py` | Task Scheduler XML（WakeToRun/StartWhenAvailable） |
+| Windows 托盘 | `ui/windows-tray/` | PowerShell + WinForms 托盘、图标、启动脚本 |
+| CI | `.github/workflows/test.yml` | Ubuntu/macOS/Windows 三平台跑测试 |
 | 验收测试 | `tests/` | 48 个 unittest 用例（原 41 + 本轮 7 个回归） |
 | 菜单栏源码 | `ui/menubar/main.swift`、`ui/menubar/build.sh` | 原生 AppKit app |
 | 运行时数据 | `~/Library/Application Support/codex-auto-continue/` | `state.json`、`run.log`、`quota-cache.json` |
@@ -33,6 +36,7 @@
 ### 用户已确认
 
 1. ~~最终做 Codex 插件、win/mac 通用~~ → **2026-10-24 用户决定放弃 Codex 插件方向**，保留 CLI + macOS 菜单栏；跨平台只保留 CLI 侧。
+1. **Windows 方向**：用户 2026-10-24 决定调度适配器 + 托盘一起做，已有实体/云 Windows 可做真机验收；Linux systemd 暂缓。
 2. **只续显式 arm 的线程**，不自动扫描全量。
 3. 基础版 **只做本地通知**；邮件作为可选 webhook 方式写在 README，不内置任何凭据。
 4. **不做关机补跑**；只处理睡眠（唤醒后 launchd 补跑 + 执行期间 `caffeinate`）。
@@ -73,12 +77,13 @@
   - `queue accepted and a new turn started (App visible)`
   - `all armed threads finished; removing scheduler job`
 - 当前无已安排任务：`~/Library/LaunchAgents` 无 `codex-auto-continue*`；`state.json` 中唯一线程状态 `done`。
+- **Windows（v0.4.0，待真机验证）**：`scheduler/windows.py` 用 `schtasks /Create /XML` 注册 `CodexAutoContinue` 任务（`WakeToRun`、`StartWhenAvailable`、`InteractiveToken`）；托盘为 PowerShell + WinForms（`ui/windows-tray`），功能对齐 macOS 菜单栏；`bin/codex-continue.cmd` 为 Windows 启动器；Windows PID 存活检测、`.cmd` codex 路径、PowerShell Toast 已加；CI 增加三平台矩阵。**尚未在实体 Windows 上跑过**。
 - 原交接时记录有 2 个因额度中断、**未安排**的会话（本轮未重新扫描，不能当作实时列表）：`分析题目解法思路`、`查找隔空手势操作电脑的方法`（随时可用 `arm`）。
 
 ### 未做 / 未验证
 
-- Windows / Linux 调度适配器（systemd user timer、Task Scheduler）。
-- Windows 托盘 UI。
+- **Windows 真机验证**（用户已有机器，待执行：登录 Codex → arm → 到点 queue → 托盘/通知 → 任务计划是否唤醒）。
+- Linux systemd user timer 适配器。
 - 自动扫描全部中断线程 + 项目白名单模式。
 - `pmset schedule wake` 定时唤醒（可选，需 sudo）。
 - 无新的图标待办；后续如需改变品牌方向再改 SVG／Swift 母版。
