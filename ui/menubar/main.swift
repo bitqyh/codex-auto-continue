@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 // MARK: - Data model
@@ -132,6 +133,7 @@ final class CLI {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
+    private var instanceLockFD: Int32 = -1
     private var snapshot = Snapshot()
     private var timer: Timer?
     private var refreshing = false
@@ -145,7 +147,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return [withFraction, plain]
     }()
 
+    private func acquireInstanceLock() -> Bool {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/codex-auto-continue")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let lockPath = directory.appendingPathComponent("menubar.lock").path
+        let descriptor = open(lockPath, O_CREAT | O_RDWR, 0o644)
+        if descriptor < 0 { return true }
+        if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            close(descriptor)
+            return false
+        }
+        instanceLockFD = descriptor
+        let owner = "\(ProcessInfo.processInfo.processIdentifier)\n"
+        _ = ftruncate(descriptor, 0)
+        _ = write(descriptor, owner, owner.utf8.count)
+        return true
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // --ui-selftest is a short-lived diagnostic instance; it must not fight
+        // the running app for the single-instance lock.
+        if !CommandLine.arguments.contains("--ui-selftest"), !acquireInstanceLock() {
+            // Another CodexContinue instance already owns the menu bar item.
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
@@ -656,9 +683,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             """
             try? fm.createDirectory(at: loginPlistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? plist.write(to: loginPlistURL, atomically: true, encoding: .utf8)
-            let uid = getuid()
-            _ = shell("/bin/launchctl", ["bootout", "gui/\(uid)/local.qyh.codex-continue-menubar"])
-            _ = shell("/bin/launchctl", ["bootstrap", "gui/\(uid)", loginPlistURL.path])
+            // Do not bootstrap here: RunAtLoad would immediately start a second
+            // instance. ~/Library/LaunchAgents is loaded automatically at login.
         } else {
             let uid = getuid()
             _ = shell("/bin/launchctl", ["bootout", "gui/\(uid)/local.qyh.codex-continue-menubar"])

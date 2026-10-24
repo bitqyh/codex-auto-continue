@@ -154,6 +154,7 @@ cd ui/menubar
 - 会话名与 Codex 会话列表一致：读取 Codex 状态库 `threads.name`（改名后同步），退化时依次用首条消息标题、目录名
 - 每 60 秒自动刷新，打开菜单时也会刷新；全部操作走同一套 CLI，不另存状态
 - 权限：不需要管理员；不需要全盘访问/辅助功能；只有「开机自动启动」会写一个 `~/Library/LaunchAgents` 项
+- 单实例保护：重复启动会被退出（`Application Support/codex-auto-continue/menubar.lock`），不会出现两个状态栏图标；打开「开机自动启动」只写登录项、不会当场再拉起一份
 
 自检（无需看界面，验证菜单项能正常生成）：
 

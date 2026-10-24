@@ -7,11 +7,11 @@
 
 - **目标**：Codex 账号额度（usage limit）重置后，自动让被中断的会话继续。
 - **交付形态**：跨平台 CLI（核心，Python 标准库）＋ macOS 原生菜单栏 app ＋ Windows Task Scheduler 调度与 PowerShell 托盘。Codex 插件方向已放弃（2026-10-24 决定），marketplace/插件文件已从仓库移除。
-- **当前版本**：`0.4.0`（`src/codex_auto_continue/__init__.py`）。
+- **当前版本**：`0.4.2`（`src/codex_auto_continue/__init__.py`）。
 - **权威工作目录**：`/Users/qyh/Projects/gptwork/codex-auto-continue`（已部署，菜单栏 app 由此构建）。
 - **开发镜像**：`/Users/qyh/Documents/deepseek-harness/default-workspace/codex-auto-continue`（由权威目录 rsync 同步，排除 `.git` 与构建目录）。
-- **版本控制**：git 仓库，tag `v0.4.0`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
-- **更新时间**：2026-10-24 16:05 CST。本轮实现 Windows 调度 + 托盘并发布 v0.4.0。
+- **版本控制**：git 仓库，tag `v0.4.2`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
+- **更新时间**：2026-10-24 16:05 CST。本轮实现 Windows 调度 + 托盘并发布 v0.4.2（菜单栏单实例 + 登录项重复启动修复）。
 
 ## 2. 权威资料
 
