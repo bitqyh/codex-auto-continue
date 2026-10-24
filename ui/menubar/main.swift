@@ -52,19 +52,9 @@ final class CLI {
             return bundled
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let direct = home.appendingPathComponent("Projects/gptwork/codex-auto-continue/plugins/codex-auto-continue/bin/codex-continue").path
+        let direct = home.appendingPathComponent("Projects/gptwork/codex-auto-continue/bin/codex-continue").path
         if FileManager.default.isExecutableFile(atPath: direct) {
             return direct
-        }
-        let cacheRoot = home.appendingPathComponent(".codex/plugins/cache")
-        if let enumerator = FileManager.default.enumerator(at: cacheRoot, includingPropertiesForKeys: nil) {
-            var found: [String] = []
-            for case let url as URL in enumerator {
-                if url.lastPathComponent == "codex-continue", url.path.contains("codex-auto-continue") {
-                    if FileManager.default.isExecutableFile(atPath: url.path) { found.append(url.path) }
-                }
-            }
-            if let best = found.sorted().last { return best }
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")

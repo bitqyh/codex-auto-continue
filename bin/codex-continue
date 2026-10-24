@@ -1,6 +1,5 @@
 #!/bin/sh
-# Codex Auto Continue launcher (macOS / Linux).
-# Resolves this plugin's bundled Python package and runs the CLI.
+# Launcher for the codex-auto-continue CLI inside this repository.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -24,9 +23,9 @@ if [ -z "$py" ]; then
 fi
 
 if [ -n "${PYTHONPATH:-}" ]; then
-  PYTHONPATH="$root/lib:$PYTHONPATH"
+  PYTHONPATH="$root/src:$PYTHONPATH"
 else
-  PYTHONPATH="$root/lib"
+  PYTHONPATH="$root/src"
 fi
 export PYTHONPATH
 exec "$py" -m codex_auto_continue "$@"

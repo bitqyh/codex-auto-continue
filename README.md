@@ -26,42 +26,21 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 
 ## 安装
 
-### 方式一：作为 Codex 插件（推荐）
-
-本仓库同时是一个 Codex marketplace（`.agents/plugins/marketplace.json`），插件包自带
-Python CLI 和启动脚本，不需要单独 `pip install`。
-
-```bash
-# 本地路径
-codex plugin marketplace add /path/to/codex-auto-continue
-# 或 GitHub 仓库
-codex plugin marketplace add bitqyh/codex-auto-continue
-
-codex plugin add codex-auto-continue@qyh-tools
-```
-
-重启 Codex 后，对话里说「额度重置后继续这个任务」就会触发技能。
-插件自带的 CLI 也可以直接手动运行：
-
-```bash
-<plugin>/bin/codex-continue scan          # macOS / Linux
-<plugin>\bin\codex-continue.cmd scan    # Windows
-```
-
-### 方式二：只装 CLI
-
 ```bash
 git clone https://github.com/bitqyh/codex-auto-continue ~/Projects/gptwork/codex-auto-continue
 cd ~/Projects/gptwork/codex-auto-continue
+
+# 方式 A：安装成命令（可选）
 python3 -m pip install -e .        # 或 pipx install .
 codex-continue --version
+
+# 方式 B：不安装，直接用仓库内的启动器
+./bin/codex-continue --version
 ```
 
-不安装也可以直接用源码运行：
+`bin/codex-continue` 会自动把仓库的 `src/` 加入 `PYTHONPATH`，不依赖 pip。
 
-```bash
-PYTHONPATH=src python3 -m codex_auto_continue --help
-```
+> 说明：Codex 插件方向已放弃（2026-10-24 决定），仓库不再提供 marketplace / 插件；三个入口中的插件入口已移除，保留 CLI 与 macOS 菜单栏。
 
 ## 快速开始
 
@@ -159,7 +138,7 @@ codex-continue disarm --all
 
 ## 菜单栏界面（macOS）
 
-除 CLI 与 Codex 插件外，仓库还带一个原生 AppKit 菜单栏 app（`ui/menubar/`）：
+除 CLI 外，仓库还带一个原生 AppKit 菜单栏 app（`ui/menubar/`）：
 
 ```bash
 cd ui/menubar
@@ -200,7 +179,6 @@ ls ~/Applications/CodexContinue.app/Contents/Resources/statusTemplate*
 
 整套图标采用石墨黑（`#101A1B`）、薄荷绿（`#7EECC0`）与暖白：环形箭头表示额度重置，播放键表示继续任务。
 
-- 插件：`plugins/codex-auto-continue/assets/logo.png`（512px）、可编辑的 `logo.svg`、24px 单色 `composerIcon.svg`。
 - 应用：`ui/menubar/assets/AppIcon.icns`、1024px PNG 与 SVG 母版、完整 `AppIcon.iconset`。
 - 菜单栏：18pt `statusTemplate.png` 及 @2x / @3x，由 AppKit template 模式适配深浅色。
 
@@ -210,7 +188,6 @@ ls ~/Applications/CodexContinue.app/Contents/Resources/statusTemplate*
 swift scripts/build_icons.swift
 iconutil -c icns ui/menubar/assets/AppIcon.iconset -o ui/menubar/assets/AppIcon.icns
 ui/menubar/build.sh --install
-codex plugin add codex-auto-continue@qyh-tools
 ```
 
 `run --dry-run` 仅读取状态及新鲜的本地额度缓存，不启动 app-server，不发送消息、不获取运行锁、不防睡，也不改变文件和调度；没有新鲜缓存时会标记额度未知，正式执行仍强制刷新。
@@ -219,15 +196,13 @@ codex plugin add codex-auto-continue@qyh-tools
 
 | 项 | 占用 |
 | --- | --- |
-| 插件缓存 `~/.codex/plugins/cache/...` | ~330 KB |
-| 插件自带 Python 库 | ~300 KB |
 | 菜单栏 app `~/Applications/CodexContinue.app` | ~200 KB |
 | 数据目录（状态/日志/额度缓存） | ~20 KB，日志按 256 KB × 3 滚动 |
 | 菜单栏常驻 | RSS ~37 MB，自身 CPU 0%；每 60 秒刷新一次 |
 | 暖刷新（默认） | ~0.05 秒：直接读额度缓存 |
 | 每次刷新额外开销 | 扫描 rollout ~1.2 秒（python 子进程 ~30 MB），仅当菜单/定时需要时运行 |
 | 冷刷新（每 5 分钟一次） | 5–12 秒，临时拉起 `codex app-server --stdio`（峰值 RSS ~125 MB），随即退出 |
-| 综合 CPU 占用 | 菜单栏运行时约占单核 2–4%（清醒时），合计磁盘 ~0.5 MB |
+| 综合 CPU 占用 | 菜单栏运行时约占单核 2–4%（清醒时），合计磁盘 ~0.3 MB |
 | 定时任务 | 只在触发时刻运行一次 runner（python ~30 MB），续跑由 Codex App 执行；本工具没有常驻守护进程 |
 
 额度缓存可用 `codex-continue config --set quota_cache_seconds=300` 调大，或 `status --refresh` 强制刷新。
@@ -243,7 +218,6 @@ codex plugin add codex-auto-continue@qyh-tools
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
-python3 scripts/build_plugin.py     # 改完 CLI 后重新生成插件内的 lib 副本
 ```
 
 测试包含：rollout 解析、额度 JSON 解析、触发时间计算、状态/锁、以及用假 `codex` 可执行文件跑通的 queue 成功、queue 失败回退 resume、线程已继续等场景。
@@ -253,13 +227,12 @@ python3 scripts/build_plugin.py     # 改完 CLI 后重新生成插件内的 lib
 - [x] macOS launchd 调度器
 - [ ] Linux systemd user timer 适配器
 - [ ] Windows Task Scheduler 适配器
-- [x] 打包成 Codex 插件（marketplace + SKILL.md + 自带 CLI，一条命令安装）
+- ~~Codex 插件方向~~：2026-10-24 决定放弃，已从仓库移除
 - [ ] 可选的“自动扫描全部中断线程 + 项目白名单”模式
 - [x] macOS 菜单栏 app（`ui/menubar`，原生 AppKit）
 - [ ] Windows 托盘 UI（复用 CLI 的 JSON 接口）
 - [x] 续跑消息自定义：`arm` 交互输入 / `--edit`（$EDITOR）、`template` 按项目保存模板
 - [x] 睡眠处理：launchd 唤醒补跑 + `caffeinate` 保护执行窗口
-- [ ] 插件内置 MCP server，把 scan/arm/status 暴露成结构化工具（当前技能走 CLI）
 - [ ] 可选：陪跑模式（queue 后盯 rollout 期间保持唤醒）
 - [ ] 可选：`pmset schedule wake` 定时唤醒（需 sudo；合盖与 Apple Silicon 定时开机会受限）
 
