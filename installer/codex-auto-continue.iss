@@ -21,8 +21,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-SourceDir=..
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=CodexContinue-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
@@ -41,7 +40,7 @@ Name: "startup"; Description: "开机自动启动托盘"; GroupDescription: "附
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："; Flags: unchecked
 
 [Files]
-Source: "dist\CodexContinue-{#AppVersion}-win-x64\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\dist\CodexContinue-{#AppVersion}-win-x64\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 Name: "{userprograms}\{#AppName}"; Filename: "{app}\ui\windows-tray\CodexContinueTray.vbs"; WorkingDir: "{app}"
