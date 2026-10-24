@@ -187,7 +187,7 @@ class RunnerTests(unittest.TestCase):
         for scenario in ("interrupted", "continued", "missing"):
             with self.subTest(scenario=scenario):
                 if scenario == "continued":
-                    self.rollout.write_text(_rollout_lines(False))
+                    self.rollout.write_text(_rollout_lines(False), encoding="utf-8")
                 elif scenario == "missing":
                     self.rollout.unlink()
                 before = thread.to_dict()

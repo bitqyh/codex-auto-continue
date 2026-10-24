@@ -151,7 +151,7 @@ class QuotaCacheTests(unittest.TestCase):
         usage._write_cache(stale)
         raw = json.loads(usage._cache_path().read_text())
         raw["fetched_at"] = old
-        usage._cache_path().write_text(json.dumps(raw))
+        usage._cache_path().write_text(json.dumps(raw), encoding="utf-8")
         self.assertIsNone(usage._read_cache(120))
         with mock.patch.object(usage, "fetch_from_app_server", side_effect=RuntimeError("down")), mock.patch.object(
             usage, "fetch_from_codexbar", return_value=None
@@ -192,7 +192,7 @@ class QuotaCacheTests(unittest.TestCase):
                     "primaryLimit": {"usedPercent": 100, "windowMinutes": 300,
                                      "resetsAt": "2020-01-01T00:00:00Z"},
                 }}
-                dashboard.write_text(json.dumps(payload))
+                dashboard.write_text(json.dumps(payload), encoding="utf-8")
                 os.utime(dashboard, (old.timestamp(), old.timestamp()))
                 before = (dashboard.read_bytes(), dashboard.stat().st_mtime_ns)
                 with mock.patch.object(paths, "codexbar_dashboard_path", return_value=dashboard), \
