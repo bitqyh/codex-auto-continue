@@ -232,7 +232,8 @@ class FindCodexTests(unittest.TestCase):
         bundled.parent.mkdir(parents=True)
         bundled.write_text("", encoding="utf-8")
         with mock.patch.dict(os.environ, {"USERPROFILE": str(self.root)}, clear=False), \
-             mock.patch.object(usage.os, "name", "nt"), \
+             mock.patch.object(usage, "_is_windows", return_value=True), \
+             mock.patch.object(usage, "_windows_codex_candidates", return_value=[bundled]), \
              mock.patch.object(usage.shutil, "which", return_value=None):
             self.assertEqual(usage.find_codex(), str(bundled))
 

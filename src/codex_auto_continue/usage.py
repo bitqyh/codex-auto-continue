@@ -117,13 +117,17 @@ def _windows_codex_candidates() -> list[Path]:
     return candidates
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def find_codex(config_codex_path: str | None = None) -> str | None:
     if config_codex_path and Path(config_codex_path).exists():
         return config_codex_path
     env = shutil.which("codex")
     if env:
         return env
-    if os.name == "nt":
+    if _is_windows():
         candidates = _windows_codex_candidates()
     else:
         candidates = [
