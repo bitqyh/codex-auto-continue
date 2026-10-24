@@ -88,6 +88,7 @@
 - `pmset schedule wake` 定时唤醒（可选，需 sudo）。
 - 无新的图标待办；后续如需改变品牌方向再改 SVG／Swift 母版。
 - ~~GitHub 仓库初始化与推送~~（已完成：https://github.com/bitqyh/codex-auto-continue）
+- **Release 分系统产物**：暂缓。用户 2026-10-24 决定等 Windows 真机验收通过后再做；计划为免签方案（Windows 便携 zip = 嵌入 Python + 托盘；macOS `CodexContinue.app` zip = ad-hoc 签名），不购买签名证书。当前 Release 里的 `Source code (zip/tar.gz)` 是 GitHub 自动源码归档，不分系统。
 
 ## 5. 接续动作
 
