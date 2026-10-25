@@ -72,6 +72,8 @@ class Config:
     notify_email: bool = False
     webhook_url: str | None = None
     codex_path: str | None = None
+    model: str | None = None
+    proxy: str | None = None
     project_templates: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -89,6 +91,8 @@ class Config:
             },
             "webhook_url": self.webhook_url,
             "codex_path": self.codex_path,
+            "model": self.model,
+            "proxy": self.proxy,
             "project_templates": dict(self.project_templates),
         }
 
@@ -107,6 +111,8 @@ class Config:
             notify_email=bool(notifications.get("email", False)),
             webhook_url=raw.get("webhook_url"),
             codex_path=raw.get("codex_path"),
+            model=raw.get("model"),
+            proxy=raw.get("proxy"),
             project_templates={
                 str(key): str(value)
                 for key, value in (raw.get("project_templates") or {}).items()

@@ -189,7 +189,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-diagnostics.
 - 2026-10-25 16:52 实况：`primary 300m used=100% (resets 19:14:20)`、`secondary 10080m used=16%`，
   即账号当前处于真实的额度耗尽状态，`arm` 正确排到 **19:17:20**（reset + 180s grace），
   `schtasks` Ready、`WakeToRun/StartWhenAvailable=true`、任务动作为隐藏 vbs。
-- **待验证**：19:17 由计划任务自动触发的真实续跑（需确认 run.log 与 Codex 会话出现新回合）。
+- **已验收（2026-10-25 23:41:53）**：计划任务自动触发（23:38:55）→ queue 路径 120s 未出回合
+  （Codex App 未运行）→ 回退 `codex exec resume` → **`resume completed`**，
+  `state.json` 中 `status=done attempts=1 last_error=null`，会话 rollout 从 68 行增至 86 行。
+  即「到点自动触发 + 真实续跑 + 新回合」全链路通过。第 2 节「不等时间立即触发」等价于手动
+  `schtasks /Run`，本轮另外验证了真实到点触发（无需手动）。
+
+#### 续跑可用性的三个前置配置（2026-10-25 新增）
+
+| 配置 | 值 | 作用 |
+|---|---|---|
+| `codex_path` | `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\codex.exe`（0.164） | 旧 `.codex\.sandbox-bin\codex.exe`（0.119）不支持账号当前模型；App 自带 CLI 才有 `queue` 与 `gpt-6.1-sol` |
+| `model` | `gpt-6.1-sol` | `~/.codex/config.toml` 里的 `gpt-5.4` 是 API 专用，ChatGPT 登录会 `model_not_found` |
+| `proxy` | `http://127.0.0.1:7890` | 计划任务环境没有 `HTTPS_PROXY`；runner/usage 会把它注入子进程，否则 app-server 网络超时（`quota unavailable`） |
+
+均可用 `codex-continue config --set <key>=<value>` 设置。
+
+#### 遗留问题（低优先级）
+
+1. 计划任务在自身运行中 `schtasks /Delete` 会被 Windows 拒绝，"自清理辅助任务"方案在实机未验证成功；
+   当前表现为任务残留（`Next Run` 指向已过去的时刻，不会造成重复续跑）。
+2. 计划任务环境首次读额度可能仍报 `quota unavailable`，但不影响后续 queue/resume。
 
 ### 8.3.1 本轮修复（Windows 侧，2026-10-25）
 

@@ -224,9 +224,21 @@ def _app_server_argv(codex_path: str) -> list[str]:
     return argv
 
 
-def fetch_from_app_server(codex_path: str, timeout_seconds: float = 30.0) -> QuotaSnapshot:
+def _env_with_proxy(proxy: str | None) -> dict[str, str] | None:
+    """Extra environment for child processes; proxy matters behind CN networks."""
+    if not proxy:
+        return None
+    env = dict(os.environ)
+    env["HTTPS_PROXY"] = proxy
+    env["HTTP_PROXY"] = proxy
+    return env
+
+
+def fetch_from_app_server(codex_path: str, timeout_seconds: float = 30.0,
+                          proxy: str | None = None) -> QuotaSnapshot:
     process = subprocess.Popen(
         _app_server_argv(codex_path),
+        env=_env_with_proxy(proxy),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -422,6 +434,7 @@ def snapshot(
     max_age: float = 0,
     force: bool = False,
     read_only: bool = False,
+    proxy: str | None = None,
 ) -> QuotaSnapshot | None:
     """Read quota; read_only uses fresh local caches without writing or starting RPC."""
     if not force:
@@ -441,7 +454,7 @@ def snapshot(
     codex = find_codex(codex_path)
     if codex:
         try:
-            fresh = fetch_from_app_server(codex)
+            fresh = fetch_from_app_server(codex, proxy=proxy)
             _write_cache(fresh)
             return fresh
         except Exception:  # noqa: BLE001 - fall through to cache

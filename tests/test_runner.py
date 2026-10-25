@@ -300,6 +300,23 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(outcome["ok"])
         self.assertEqual(thread.status, cfg.STATUS_DONE)
 
+    def test_resume_args_include_configured_model(self) -> None:
+        args = runner._resume_exec_args(
+            str(self.fake), self.home / "last.txt", self._thread(), "继续", "gpt-6.1-sol"
+        )
+        self.assertIn("-m", args)
+        self.assertEqual(args[args.index("-m") + 1], "gpt-6.1-sol")
+
+    def test_resume_args_omit_model_by_default(self) -> None:
+        args = runner._resume_exec_args(str(self.fake), self.home / "last.txt", self._thread(), "继续")
+        self.assertNotIn("-m", args)
+
+    def test_proxy_env_helper(self) -> None:
+        self.assertIsNone(runner._env_with_proxy(None))
+        env = runner._env_with_proxy("http://127.0.0.1:7890")
+        self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7890")
+        self.assertEqual(env["HTTP_PROXY"], "http://127.0.0.1:7890")
+
 
 if __name__ == "__main__":
     unittest.main()

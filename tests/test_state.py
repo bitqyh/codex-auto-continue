@@ -124,6 +124,18 @@ class StateTests(unittest.TestCase):
         thread.status = cfg.STATUS_ARMED
         self.assertTrue(thread.is_pending)
 
+    def test_config_model_roundtrip(self) -> None:
+        cfg.save_config(cfg.Config(model="gpt-6.1-sol"))
+        self.assertEqual(cfg.load_config().model, "gpt-6.1-sol")
+        cfg.save_config(cfg.Config())
+        self.assertIsNone(cfg.load_config().model)
+
+    def test_config_proxy_roundtrip(self) -> None:
+        cfg.save_config(cfg.Config(proxy="http://127.0.0.1:7890"))
+        self.assertEqual(cfg.load_config().proxy, "http://127.0.0.1:7890")
+        cfg.save_config(cfg.Config())
+        self.assertIsNone(cfg.load_config().proxy)
+
 
 if __name__ == "__main__":
     unittest.main()

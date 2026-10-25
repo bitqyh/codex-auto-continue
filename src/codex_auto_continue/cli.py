@@ -65,6 +65,7 @@ def cmd_usage(args: argparse.Namespace) -> int:
         config.codex_path,
         max_age=config.quota_cache_seconds,
         force=getattr(args, "refresh", False),
+        proxy=config.proxy,
     )
     if snapshot is None:
         if args.json:
@@ -169,7 +170,7 @@ def cmd_arm(args: argparse.Namespace) -> int:
         forced=bool(args.force),
     )
     state.threads[info.thread_id] = thread
-    snapshot = usage.snapshot(config.codex_path, max_age=config.quota_cache_seconds)
+    snapshot = usage.snapshot(config.codex_path, max_age=config.quota_cache_seconds, proxy=config.proxy)
 
     if args.at:
         try:
@@ -263,7 +264,7 @@ def cmd_disarm(args: argparse.Namespace) -> int:
         scheduler.remove()
     else:
         config = cfg.load_config()
-        snapshot = usage.snapshot(config.codex_path, max_age=config.quota_cache_seconds)
+        snapshot = usage.snapshot(config.codex_path, max_age=config.quota_cache_seconds, proxy=config.proxy)
         runner.refresh_schedule(state, cfg.load_config(), snapshot, scheduler)
         cfg.save_state(state)
     cfg.append_log(f"disarmed {', '.join(removed)}")
@@ -279,6 +280,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         config.codex_path,
         max_age=config.quota_cache_seconds,
         force=getattr(args, "refresh", False),
+        proxy=config.proxy,
     )
     scheduler = for_platform()
     titles = threads.load_thread_titles(list(state.threads.keys())) if state.threads else {}
@@ -330,7 +332,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     config = cfg.load_config()
     state = cfg.load_state()
     scheduler = for_platform()
-    snapshot = usage.snapshot(config.codex_path, max_age=config.quota_cache_seconds)
+    snapshot = usage.snapshot(config.codex_path, max_age=config.quota_cache_seconds, proxy=config.proxy)
     fire_at = runner.refresh_schedule(state, config, snapshot, scheduler)
     cfg.save_state(state)
     print(f"调度器：{scheduler.describe()}")
@@ -406,6 +408,10 @@ def cmd_config(args: argparse.Namespace) -> int:
             config.notify_email = value.lower() not in ("0", "false", "no")
         elif key == "codex_path":
             config.codex_path = value or None
+        elif key == "model":
+            config.model = value or None
+        elif key == "proxy":
+            config.proxy = value or None
         else:
             print(f"未知配置项: {key}", file=sys.stderr)
             return 2

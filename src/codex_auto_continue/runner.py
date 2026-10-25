@@ -126,7 +126,17 @@ def _safe_cwd(cwd: str | None) -> str | None:
     return str(home) if home.is_dir() else None
 
 
-def _run_codex(args: list[str], cwd: str | None, timeout: float) -> tuple[int, str]:
+def _env_with_proxy(proxy: str | None) -> dict[str, str] | None:
+    if not proxy:
+        return None
+    env = dict(os.environ)
+    env["HTTPS_PROXY"] = proxy
+    env["HTTP_PROXY"] = proxy
+    return env
+
+
+def _run_codex(args: list[str], cwd: str | None, timeout: float,
+               proxy: str | None = None) -> tuple[int, str]:
     if os.name == "nt" and args and args[0].lower().endswith((".cmd", ".bat")):
         args = ["cmd.exe", "/c", *args]
     try:
@@ -139,6 +149,7 @@ def _run_codex(args: list[str], cwd: str | None, timeout: float) -> tuple[int, s
             errors="replace",
             timeout=timeout,
             check=False,
+            env=_env_with_proxy(proxy),
         )
         output = (result.stdout or "") + (result.stderr or "")
         return result.returncode, output.strip()
@@ -178,7 +189,8 @@ def queue_supported(codex: str) -> bool:
     return supported
 
 
-def _resume_exec_args(codex: str, last_message: Path, thread: cfg.ArmedThread, message: str) -> list[str]:
+def _resume_exec_args(codex: str, last_message: Path, thread: cfg.ArmedThread, message: str,
+                      model: str | None = None) -> list[str]:
     """Build a `codex exec ... resume` invocation for the installed CLI.
 
     Older CLIs accepted ``--approve-for-me``; current Codex builds replaced it
@@ -198,6 +210,11 @@ def _resume_exec_args(codex: str, last_message: Path, thread: cfg.ArmedThread, m
         args.append("--full-auto")
     if "--skip-git-repo-check" in help_text:
         args.append("--skip-git-repo-check")
+    if model:
+        # The Codex App's config.toml may pin an API-only model (e.g. gpt-5.4)
+        # that ChatGPT accounts cannot use; a configured model keeps the
+        # scheduled resume from failing with model_not_found.
+        args.extend(["-m", model])
     args.extend(["-o", str(last_message), "resume", thread.thread_id, message])
     return args
 
@@ -214,13 +231,14 @@ def _wait_for_rollout_growth(path: Path, baseline: int, seconds: int) -> bool:
     return False
 
 
-def _send_via_queue(codex: str, thread: cfg.ArmedThread, message: str, verify_seconds: int) -> tuple[bool, str]:
+def _send_via_queue(codex: str, thread: cfg.ArmedThread, message: str, verify_seconds: int,
+                    proxy: str | None = None) -> tuple[bool, str]:
     # `queue` talks to the app server and does not need a working directory;
     # avoiding it keeps the launchd job clear of protected folders (macOS TCC).
     if not queue_supported(codex):
         return False, "queue is not supported by this Codex CLI (Codex App only)"
     code, output = _run_codex(
-        [codex, "queue", "--thread", thread.thread_id, "--message", message], None, 60
+        [codex, "queue", "--thread", thread.thread_id, "--message", message], None, 60, proxy
     )
     if code != 0:
         return False, f"queue failed (exit {code}): {output[-400:]}"
@@ -229,12 +247,15 @@ def _send_via_queue(codex: str, thread: cfg.ArmedThread, message: str, verify_se
     return False, "queue accepted but no new turn appeared in time"
 
 
-def _send_via_resume(codex: str, thread: cfg.ArmedThread, message: str) -> tuple[bool, str]:
+def _send_via_resume(codex: str, thread: cfg.ArmedThread, message: str,
+                     model: str | None = None,
+                     proxy: str | None = None) -> tuple[bool, str]:
     last_message = paths.data_dir() / f"last-message-{thread.thread_id}.txt"
     code, output = _run_codex(
-        _resume_exec_args(codex, last_message, thread, message),
+        _resume_exec_args(codex, last_message, thread, message, model),
         thread.cwd,
         timeout=3600,
+        proxy=proxy,
     )
     if code == 0:
         return True, f"resume completed, last message: {last_message}"
@@ -282,7 +303,7 @@ def continue_thread(
     ok, detail = _send_via_queue(codex_path, thread, message, config.queue_verify_seconds)
     if not ok:
         cfg.append_log(f"queue path failed for {thread.thread_id}: {detail}; trying resume")
-        ok, detail = _send_via_resume(codex_path, thread, message)
+        ok, detail = _send_via_resume(codex_path, thread, message, config.model, config.proxy)
     if ok:
         thread.status = cfg.STATUS_DONE
         thread.completed_at = cfg.iso(dt.datetime.now(dt.timezone.utc))
@@ -333,7 +354,7 @@ def _preview(config: cfg.Config, now: dt.datetime | None, codex_path: str | None
     if not pending:
         return summary
     snapshot = None if os.environ.get("CODEX_AUTO_CONTINUE_SKIP_QUOTA") == "1" else usage.snapshot(
-        config.codex_path, max_age=config.quota_cache_seconds, read_only=True
+        config.codex_path, max_age=config.quota_cache_seconds, read_only=True, proxy=config.proxy
     )
     summary["quota_source"] = snapshot.source if snapshot else "unavailable (execution will refresh)"
     if snapshot is not None and not snapshot.has_capacity:
@@ -369,7 +390,9 @@ def _run_locked(
             return summary
 
         skip_quota = os.environ.get("CODEX_AUTO_CONTINUE_SKIP_QUOTA") == "1"
-        snapshot = None if skip_quota else usage.snapshot(config.codex_path, force=True)
+        snapshot = None if skip_quota else usage.snapshot(
+            config.codex_path, force=True, proxy=config.proxy
+        )
         if snapshot is not None:
             summary["quota_source"] = snapshot.source
         elif not skip_quota:
