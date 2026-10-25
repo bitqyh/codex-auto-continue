@@ -168,17 +168,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-diagnostics.
 **已知限制（本轮未修）**：Windows PowerShell 5.1 的原生参数引号规则会破坏自定义续跑消息中的 ASCII
 双引号（默认中文消息不受影响）；如需要可改用 `--message-file` 之类的 CLI 扩展。
 
-### 8.3 阻塞项：真实续跑
+### 8.3 真实续跑：根因已定位并解除（2026-10-25 第二轮）
 
-- `codex login status` 返回 `Logged in using ChatGPT`，但只是读本地 JWT；access token 已于
-  2026-07-13 过期，refresh 返回 `401 refresh_token_reused`（订阅也已于 2026-05-02 结束）。
-- 直连 `api.openai.com` / `chatgpt.com` 被 DNS 污染；本机 `127.0.0.1:7890` 代理可用，
-  codex 也读取 `HTTPS_PROXY`，但登录态本身失效，代理无法弥补。
-- 修复后的 resume 调用已实测到达 `wss://chatgpt.com/backend-api/codex/responses` 并得到
-  `401 Unauthorized`，`attempts=1`、`last_error` 写入 state/run.log；用真实中断线程做同样
-  操作即可产生新回合。
-- **用户操作**：设置 `HTTPS_PROXY/HTTP_PROXY` 用户环境变量 → `codex login` 重新登录 →
-  `bin\codex-continue.cmd arm --last --message "继续未完成的工作"`。
+原先记为「refresh token 失效」，真实错误链是两层：
+
+1. **地区限制**：Windows 直连（无代理）时 `codex` 报
+   `403 unsupported_country_region_territory`；Clash 全局节点为香港时同样 403（OpenAI 不支持香港）。
+2. **token 已失效**：换美国节点后报
+   `401 refresh_token_reused — Your refresh token has already been used ... Please try signing in again.`
+
+处理过程与结果：
+
+- Mihomo Party 切到**美国洛杉矶**节点（出口 `23.237.196.226`，FDCservers）；
+  注意 `curl https://chatgpt.com` 仍 403 是 **Cloudflare 人机挑战**（`Cf-Mitigated: challenge`），
+  不代表地区问题，验证地区应看 `http://ip-api.com/json`。
+- 系统代理已开启（`127.0.0.1:7890`），登录、`codex`、`codex-continue` 均可用；
+  计划任务需要 `HTTPS_PROXY/HTTP_PROXY` 用户环境变量（登录前设置，或写进任务包装脚本）。
+- 通过 `codex login` 重新登录成功（本地 1455 回调；SSH 会话会回收子进程，
+  所以登录进程改挂在临时计划任务里执行，完成后删除）。登录后 `auth.json` 更新，`usage` 正常返回真实额度。
+- 2026-10-25 16:52 实况：`primary 300m used=100% (resets 19:14:20)`、`secondary 10080m used=16%`，
+  即账号当前处于真实的额度耗尽状态，`arm` 正确排到 **19:17:20**（reset + 180s grace），
+  `schtasks` Ready、`WakeToRun/StartWhenAvailable=true`、任务动作为隐藏 vbs。
+- **待验证**：19:17 由计划任务自动触发的真实续跑（需确认 run.log 与 Codex 会话出现新回合）。
+
+### 8.3.1 本轮修复（Windows 侧，2026-10-25）
+
+1. `arm --force` 在 arm 时放行、执行时又被 "session is no longer waiting on a usage limit"
+   拦掉 → `forced` 持久化进 state，`continue_thread` 对 forced 线程跳过该判定。
+2. `state.json` 解析失败会静默变空（实测 PowerShell 手改带 BOM 即触发，所有已安排任务无声消失）
+   → 损坏文件改名 `state.json.corrupt-<ts>` 并写 `run.log`。
+3. `failed` 状态仍算 pending → 失败线程每 `retry_seconds` 无限重试
+   → `failed` 改为终态，不再参与调度。
+4. 计划任务在自身运行中删不掉自己（Windows 限制）→ `remove()` 失败时创建一次性
+   `CodexAutoContinueCleanup` 任务（+2 分钟）删除主任务与自身；该兜底尚未在实机复验成功，仍需跟进。
+5. 回归测试：Mac/Windows 各 74 个测试通过（+4 个新用例：forced 终态、损坏 state、failed 非 pending、任务清理路径）。
 
 ### 8.4 托盘逐项结果（见 `ui/windows-tray/README.md`；本地记录在 `evidence/tray/`，不随仓库提交）
 

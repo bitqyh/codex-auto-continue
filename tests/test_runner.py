@@ -281,6 +281,25 @@ class RunnerTests(unittest.TestCase):
         log = (self.home / "data" / "run.log").read_text(encoding="utf-8")
         self.assertIn("codex CLI not found", log)
 
+    def test_forced_thread_skips_interrupted_guard(self) -> None:
+        other = self.home / "rollout-not-interrupted.jsonl"
+        other.write_text(_rollout_lines(interrupted=False), encoding="utf-8")
+        info = rollouts.parse_rollout(other)
+        self.assertFalse(info.interrupted)
+        thread = cfg.ArmedThread(
+            thread_id=info.thread_id,
+            rollout_path=str(info.path),
+            cwd=info.cwd,
+            message="继续",
+            armed_at=cfg.iso(dt.datetime.now(dt.timezone.utc)),
+            baseline_lines=info.lines,
+            forced=True,
+        )
+        with mock.patch.object(runner, "_send_via_queue", return_value=(True, "queued")):
+            outcome = runner.continue_thread(thread, self.config, str(self.fake))
+        self.assertTrue(outcome["ok"])
+        self.assertEqual(thread.status, cfg.STATUS_DONE)
+
 
 if __name__ == "__main__":
     unittest.main()

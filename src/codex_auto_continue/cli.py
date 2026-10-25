@@ -166,6 +166,7 @@ def cmd_arm(args: argparse.Namespace) -> int:
         status=cfg.STATUS_ARMED,
         baseline_lines=info.lines,
         reset_hint=info.reset_hint,
+        forced=bool(args.force),
     )
     state.threads[info.thread_id] = thread
     snapshot = usage.snapshot(config.codex_path, max_age=config.quota_cache_seconds)

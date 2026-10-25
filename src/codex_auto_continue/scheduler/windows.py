@@ -162,8 +162,71 @@ class WindowsScheduler(Scheduler):
         start = dt.datetime.now().astimezone() + dt.timedelta(minutes=1)
         self._install(start.replace(microsecond=0), max(int(seconds), 60), workdir)
 
+    CLEANUP_TASK = "CodexAutoContinueCleanup"
+
+    def _install_cleanup_task(self) -> bool:
+        """Remove our task from a one-shot helper task.
+
+        Windows refuses to delete (and refuses to disable) a task while that
+        task is still running, and the runner performs cleanup from inside the
+        scheduled task. A one-shot helper scheduled ~2 minutes later survives
+        that window, deletes both tasks and disappears.
+        """
+        start = (dt.datetime.now().astimezone() + dt.timedelta(minutes=2)).replace(microsecond=0)
+        arguments = (
+            '/c schtasks /Delete /TN "' + self.task_name + '" /F'
+            " & schtasks /Delete /TN \"" + self.CLEANUP_TASK + "\" /F"
+        )
+        xml = (
+            '<?xml version="1.0" encoding="UTF-16"?>\n'
+            '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n'
+            "  <RegistrationInfo>\n"
+            "    <Author>codex-auto-continue</Author>\n"
+            "    <Description>Remove the Codex Auto Continue task once its last run exits.</Description>\n"
+            "  </RegistrationInfo>\n"
+            "  <Triggers>\n"
+            "    <TimeTrigger>\n"
+            f"      <StartBoundary>{start.strftime('%Y-%m-%dT%H:%M:%S')}</StartBoundary>\n"
+            "      <Enabled>true</Enabled>\n"
+            "    </TimeTrigger>\n"
+            "  </Triggers>\n"
+            "  <Principals>\n"
+            '    <Principal id="Author">\n'
+            "      <LogonType>InteractiveToken</LogonType>\n"
+            "      <RunLevel>LeastPrivilege</RunLevel>\n"
+            "    </Principal>\n"
+            "  </Principals>\n"
+            "  <Settings>\n"
+            "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n"
+            "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n"
+            "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n"
+            "    <StartWhenAvailable>true</StartWhenAvailable>\n"
+            "    <WakeToRun>true</WakeToRun>\n"
+            "    <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>\n"
+            "    <Enabled>true</Enabled>\n"
+            "  </Settings>\n"
+            '  <Actions Context="Author">\n'
+            "    <Exec>\n"
+            "      <Command>cmd.exe</Command>\n"
+            f"      <Arguments>{escape(arguments)}</Arguments>\n"
+            "    </Exec>\n"
+            "  </Actions>\n"
+            "</Task>\n"
+        )
+        xml_path = self._xml_path().with_name("task-scheduler-cleanup.xml")
+        try:
+            xml_path.write_text(xml, encoding="utf-16")
+        except OSError:
+            return False
+        result = _run_schtasks(["/Create", "/TN", self.CLEANUP_TASK, "/XML", str(xml_path), "/F"])
+        return result.returncode == 0
+
     def remove(self) -> None:
-        _run_schtasks(["/Delete", "/TN", self.task_name, "/F"])
+        result = _run_schtasks(["/Delete", "/TN", self.task_name, "/F"])
+        if result.returncode != 0:
+            # We are running inside the task: hand the cleanup to a helper.
+            if not self._install_cleanup_task():
+                _run_schtasks(["/Change", "/TN", self.task_name, "/DISABLE"])
         try:
             self._xml_path().unlink()
         except OSError:

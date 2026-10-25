@@ -198,6 +198,14 @@ def scan(days: int = 7, include_subagents: bool = False) -> list[RolloutInfo]:
             continue
         infos.append(info)
     infos.sort(key=lambda item: item.mtime, reverse=True)
+    if not include_subagents:
+        # Codex writes a fresh rollout file per continuation of the same thread
+        # (``<thread-id>_<turn-id>.jsonl``). Keep only the newest one per thread
+        # so menus/armers do not act on a stale file whose tail already moved on.
+        newest: dict[str, RolloutInfo] = {}
+        for info in infos:
+            newest.setdefault(info.thread_id, info)
+        infos = list(newest.values())
     titles = threads.load_thread_titles([info.thread_id for info in infos])
     for info in infos:
         info.title = titles.get(info.thread_id)
@@ -208,13 +216,28 @@ def interrupted(days: int = 7, include_subagents: bool = False) -> list[RolloutI
     return [info for info in scan(days=days, include_subagents=include_subagents) if info.interrupted]
 
 
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def find_rollout(thread_id: str) -> Path | None:
+    """Resolve a thread id to its most recent rollout file.
+
+    Codex appends continuations as a separate file named
+    ``<thread-id>_<turn-id>.jsonl``, so a plain ``*<thread-id>.jsonl`` glob
+    silently returns the *original* (stale) rollout. Match any rollout whose
+    name contains the id and prefer the newest by mtime.
+    """
     root = paths.sessions_dir()
     if not root.exists():
         return None
-    for path in root.rglob(f"*{thread_id}.jsonl"):
-        return path
-    return None
+    candidates = [p for p in root.rglob("rollout-*.jsonl") if thread_id in p.name]
+    if not candidates:
+        return None
+    return max(candidates, key=_mtime)
 
 
 def line_count(path: Path) -> int:

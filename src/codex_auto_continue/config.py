@@ -128,6 +128,7 @@ class ArmedThread:
     last_error: str | None = None
     completed_at: str | None = None
     reset_hint: str | None = None
+    forced: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -143,6 +144,7 @@ class ArmedThread:
             "last_error": self.last_error,
             "completed_at": self.completed_at,
             "reset_hint": self.reset_hint,
+            "forced": self.forced,
         }
 
     @classmethod
@@ -151,7 +153,10 @@ class ArmedThread:
 
     @property
     def is_pending(self) -> bool:
-        return self.status in (STATUS_ARMED, STATUS_RUNNING, STATUS_FAILED)
+        # "failed" is terminal: max_attempts is exhausted, so the runner must
+        # stop rescheduling it (otherwise Windows Task Scheduler would retry a
+        # permanently broken thread every retry_seconds forever).
+        return self.status in (STATUS_ARMED, STATUS_RUNNING)
 
 
 @dataclass
@@ -203,7 +208,17 @@ def load_state() -> State:
         return State()
     try:
         return State.from_dict(json.loads(path.read_text(encoding="utf-8")))
-    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+    except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
+        # Never lose armed threads silently: keep the unreadable file for
+        # diagnosis (UTF-8 BOM and hand edits are the usual culprits) and leave
+        # a trace in run.log so a scheduled run does not look like it never ran.
+        stamp = int(dt.datetime.now().timestamp())
+        backup = path.with_name(f"state.json.corrupt-{stamp}")
+        try:
+            path.replace(backup)
+            append_log(f"state.json unreadable ({type(exc).__name__}: {exc}); moved to {backup.name}")
+        except OSError:
+            append_log(f"state.json unreadable ({type(exc).__name__}: {exc}); continuing with empty state")
         return State()
 
 

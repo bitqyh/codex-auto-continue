@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from codex_auto_continue import rollouts
@@ -102,3 +103,43 @@ class RolloutParsingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RolloutLookupTests(unittest.TestCase):
+    def _sessions(self, tmp: str) -> Path:
+        root = Path(tmp) / "sessions"
+        root.mkdir()
+        return root
+
+    def _write_rollout(self, root: Path, name: str, thread_id: str, mtime: float,
+                       records: list[str] | None = None) -> Path:
+        path = root / name
+        meta = _record("session_meta", {"id": thread_id, "session_id": thread_id, "cwd": "/tmp/p"}, 0)
+        body = records or [meta, _user("hi", 1), _task_complete("You've hit your usage limit.", 2)]
+        path.write_text("\n".join(body) + "\n", encoding="utf-8")
+        os.utime(path, (mtime, mtime))
+        return path
+
+    def test_find_rollout_prefers_newest_continuation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._sessions(tmp)
+            tid = "aaaa1111-2222-3333-4444-555566667777"
+            old = self._write_rollout(root, f"rollout-2026-10-01T10-00-00-{tid}.jsonl", tid, 1_700_000_000)
+            new = self._write_rollout(root, f"rollout-2026-10-02T10-00-00-{tid}_deadbeef.jsonl", tid, 1_700_100_000)
+            with mock.patch.object(rollouts.paths, "sessions_dir", return_value=root):
+                found = rollouts.find_rollout(tid)
+            self.assertEqual(found, new)
+            self.assertNotEqual(found, old)
+
+    def test_scan_keeps_newest_rollout_per_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._sessions(tmp)
+            tid = "bbbb1111-2222-3333-4444-555566667777"
+            self._write_rollout(root, f"rollout-2026-10-01T10-00-00-{tid}.jsonl", tid, 1_700_000_000)
+            self._write_rollout(root, f"rollout-2026-10-02T10-00-00-{tid}_cafebabe.jsonl", tid, 1_700_100_000)
+            with mock.patch.object(rollouts.paths, "sessions_dir", return_value=root), \
+                    mock.patch.object(rollouts.threads, "load_thread_titles", return_value={}):
+                infos = rollouts.scan(days=3650)
+            self.assertEqual(len(infos), 1)
+            self.assertTrue(infos[0].interrupted)
+            self.assertIn("_cafebabe", infos[0].path.name)

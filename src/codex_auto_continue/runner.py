@@ -259,14 +259,18 @@ def continue_thread(
         return {"thread_id": thread.thread_id, "ok": False, "detail": thread.last_error}
 
     info = rollouts.parse_rollout(rollout)
-    if info.lines > thread.baseline_lines and not info.interrupted:
-        thread.status = cfg.STATUS_SUPERSEDED
-        thread.last_error = "session moved on after arming"
-        return {"thread_id": thread.thread_id, "ok": False, "detail": thread.last_error}
-    if not info.interrupted:
-        thread.status = cfg.STATUS_SUPERSEDED
-        thread.last_error = "session is no longer waiting on a usage limit"
-        return {"thread_id": thread.thread_id, "ok": False, "detail": thread.last_error}
+    if not thread.forced:
+        # A thread armed with --force is a deliberate mechanism test / manual
+        # retry: do not veto it here just because it is not quota-interrupted,
+        # otherwise --force would only work at arm time.
+        if info.lines > thread.baseline_lines and not info.interrupted:
+            thread.status = cfg.STATUS_SUPERSEDED
+            thread.last_error = "session moved on after arming"
+            return {"thread_id": thread.thread_id, "ok": False, "detail": thread.last_error}
+        if not info.interrupted:
+            thread.status = cfg.STATUS_SUPERSEDED
+            thread.last_error = "session is no longer waiting on a usage limit"
+            return {"thread_id": thread.thread_id, "ok": False, "detail": thread.last_error}
 
     thread.baseline_lines = info.lines
     message = (thread.message or config.message_template).replace("{thread_id}", thread.thread_id)

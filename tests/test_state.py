@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import tempfile
 import unittest
@@ -80,6 +81,48 @@ class StateTests(unittest.TestCase):
         paths.ensure_data_dir()
         paths.state_path().write_text("{not json", encoding="utf-8")
         self.assertEqual(cfg.load_state().threads, {})
+
+    def test_armed_thread_forced_flag_roundtrips(self) -> None:
+        state = cfg.State()
+        state.threads["abc"] = cfg.ArmedThread(
+            thread_id="abc",
+            rollout_path="/tmp/r.jsonl",
+            cwd="/tmp",
+            message="继续",
+            armed_at=cfg.iso(dt.datetime.now(dt.timezone.utc)),
+            forced=True,
+        )
+        cfg.save_state(state)
+        self.assertTrue(cfg.load_state().threads["abc"].forced)
+        # old state files without the field must still load
+        raw = json.loads(Path(paths.state_path()).read_text(encoding="utf-8"))
+        raw["threads"]["abc"].pop("forced")
+        Path(paths.state_path()).write_text(json.dumps(raw), encoding="utf-8")
+        self.assertFalse(bool(cfg.load_state().threads["abc"].forced))
+
+    def test_corrupt_state_is_preserved(self) -> None:
+        data = Path(paths.state_path())
+        data.parent.mkdir(parents=True, exist_ok=True)
+        data.write_bytes(b"\xef\xbb\xbf{ not json")
+        state = cfg.load_state()
+        self.assertEqual(state.threads, {})
+        self.assertFalse(data.exists(), "unreadable state should be moved aside")
+        backups = list(data.parent.glob("state.json.corrupt-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertIn("unreadable", Path(paths.log_path()).read_text(encoding="utf-8"))
+
+    def test_failed_thread_is_not_pending(self) -> None:
+        thread = cfg.ArmedThread(
+            thread_id="abc",
+            rollout_path="/tmp/r.jsonl",
+            cwd="/tmp",
+            message="继续",
+            armed_at=cfg.iso(dt.datetime.now(dt.timezone.utc)),
+            status=cfg.STATUS_FAILED,
+        )
+        self.assertFalse(thread.is_pending)
+        thread.status = cfg.STATUS_ARMED
+        self.assertTrue(thread.is_pending)
 
 
 if __name__ == "__main__":
