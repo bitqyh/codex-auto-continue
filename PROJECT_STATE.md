@@ -118,7 +118,7 @@
   - `CodexContinue-0.5.0-macOS.dmg`（1.6 MB，universal arm64+x86_64，ad-hoc 签名）
   - `SHA256SUMS`；release workflow 在 windows-latest 上通过了安装器静默安装 + `codex-continue --version` 冒烟
   - 三平台 tests 全绿；`release.yml` 仅在 tag 触发，签名步骤在 `SIGNPATH_API_TOKEN` 缺失时自动跳过并输出 `-unsigned.exe`
-- **v0.5.1 Release**：包含最终 Windows 修复（model/proxy、`--force` 等）；SignPath 通过前仍为 `-unsigned.exe`。审批通过并配置 Secrets 后发 v0.5.2 签名版。
+- **v0.5.1 Release（2026-10-26）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.5.1 — 包含最终 Windows 修复（model/proxy、`--force` 等）与公开 Code signing policy / privacy policy；SignPath 通过前安装器仍为 `-unsigned.exe`。审批通过并配置 Secrets 后发 v0.5.2 签名版。
 
 ## 5. 接续动作
 
