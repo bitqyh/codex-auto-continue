@@ -1,12 +1,10 @@
-# 发布与签名（RELEASING）
+# 发布（RELEASING，不签名）
 
 tag 推送后由 `.github/workflows/release.yml` 自动构建并发布：
 
-公开政策与隐私说明：[Code signing policy](../README.md#code-signing-policy)。SignPath Foundation 申请已提交，审核及生产签名配置尚未完成；当前 Windows 安装器仍未签名。
-
 | 产物 | 签名 | 构建方式 |
 | --- | --- | --- |
-| `CodexContinue-Setup-<ver>.exe` | SignPath Foundation（审核通过、配置完成且每次人工批准后） | Inno Setup，内嵌 Python |
+| `CodexContinue-Setup-<ver>-unsigned.exe` | **未签名** | Inno Setup，内嵌 Python |
 | `CodexContinue-<ver>-win-x64.zip` | 未签名 | 便携包（嵌入 Python + 托盘） |
 | `CodexContinue-<ver>-macOS.dmg` | ad-hoc（未公证） | universal app（arm64 + x86_64） |
 | `SHA256SUMS` | — | 发布 job 生成 |
@@ -36,61 +34,31 @@ git push origin v0.5.0
 pwsh ./scripts/build_windows_bundle.ps1 -Version 0.5.0
 choco install innosetup -y
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=0.5.0" "installer\codex-auto-continue.iss"
-# 产物：dist/CodexContinue-0.5.0-win-x64.zip 与 dist/CodexContinue-Setup-0.5.0.exe
+# 产物：dist/CodexContinue-0.5.0-win-x64.zip 与 dist/CodexContinue-Setup-0.5.1-unsigned.exe
 ```
 
 macOS 构建会把 `src/` 和 `bin/codex-continue` 嵌入 `Contents/Resources/cli`，`CLIPath` 使用包内相对路径，因此 app 移动到 `/Applications` 后仍可用。
 
-## 3. SignPath Foundation 接入（Windows 签名）
+## 3. 签名状态（当前不签名）
 
-1. 在 https://signpath.org/apply 申请（本项目已提交，等待审核）。除公开源码、OSI 认可的许可、已发布产物与文档外，还需满足基金会的项目声誉、安全、签名政策和隐私要求；以 [官方条件](https://signpath.org/terms) 及审核结果为准。
-2. 审核通过后，在 SignPath 中：
-   - 创建 Project，关联 `bitqyh/codex-auto-continue`；
-   - 在 Organization 中添加 Trusted Build System **GitHub.com** 并链接 Project；
-   - 安装 SignPath GitHub App（公开仓库也建议安装，便于审计）；
-   - 确保所有团队成员对 GitHub 和 SignPath 访问启用 MFA；
-   - 创建 signing policy（如 `release-signing`），要求每次签名由 [Code signing policy](../README.md#code-signing-policy) 列出的 approver 人工批准，不允许 CI token 自动批准；
-   - 创建 artifact configuration，用于签名安装器。`actions/upload-artifact` 默认把文件包成 zip，因此根元素用 `zip-file`（示例，字段以 SignPath 控制台为准）：
-     ```xml
-     <artifact-configuration xmlns="http://signpath.io/artifact-configuration">
-       <zip-file>
-         <file path="CodexContinue-Setup-*.exe" />
-       </zip-file>
-     </artifact-configuration>
-     ```
-   - 上述 XML 只说明包结构，不能作为完整的生产配置；还需按控制台支持的字段约束安装器产品名为 `Codex Auto Continue`，并保证产品版本与该次 release tag 一致。只签项目安装器，不单独重签包内的上游 Python 程序或库。
-3. 在仓库 **Settings → Secrets and variables → Actions** 添加：
-
-   | Secret | 值 |
-   | --- | --- |
-   | `SIGNPATH_API_TOKEN` | SignPath 用户 API token（submitter 权限） |
-   | `SIGNPATH_ORGANIZATION_ID` | Organization ID |
-   | `SIGNPATH_PROJECT_SLUG` | Project slug |
-   | `SIGNPATH_SIGNING_POLICY_SLUG` | 例如 `release-signing` |
-   | `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | 安装器配置的 slug |
-
-4. 之后打 tag：workflow 会先上传未签名的 `Setup.exe`，调用 `signpath/github-action-submit-signing-request@v3` 提交并等待签名。维护者需核对源码 revision、CI 结果和产物来源，在 SignPath 中人工批准；签名完成后，workflow 再用 `signtool verify /pa` 校验，最后把签名后的 exe 放进 Release。审批需在 workflow 和 action 的等待时限内完成；超时失败后应检查状态再重试。
-5. `SIGNPATH_API_TOKEN` 未配置时，安装器会被重命名为 `CodexContinue-Setup-<ver>-unsigned.exe` 并照常发布（不会冒充已签名）。
-
-注意：
-- SignPath 的证书签发给 **SignPath Foundation**，安装器“发布者”显示为 SignPath Foundation，而不是个人。
-- 签名保证发布者与完整性；Windows SmartScreen 对新证书仍有信誉累积期，可能短暂提示。
-- 当前 workflow 只签名安装器（`.exe`），不对便携 zip 内的 `.cmd/.vbs/.ps1` 单独签名。
-- 每个发布页应包含指向 [Code signing policy](../README.md#code-signing-policy) 的链接；release workflow 的说明模板已包含此入口。已有发布页需要单独补链，不会随模板更新自动改变。
+- Windows 安装器**不签名**：workflow 构建出 `Setup.exe` 后，由 `scripts/finalize_windows_assets.ps1` 改名为 `CodexContinue-Setup-<ver>-unsigned.exe`，不做 Authenticode 签名。
+- macOS dmg 内 app 为 ad-hoc 签名、**未公证**；首次启动需右键打开。
+- SignPath Foundation 申请未通过；仓库不再包含 `SIGNPATH_*` Secrets 或签名步骤。如果以后重新考虑签名，需要重新评估（Azure Artifact Signing、商业 OV/EV 证书或自签名）并更新本文件。
+- `SHA256SUMS` 只校验文件完整性，不是发布者签名；Windows SmartScreen 可能提示“未知发布者”。
 
 ## 4. 本地校验
 
 ```powershell
-# Windows
-signtool verify /pa /v dist\CodexContinue-Setup-0.5.0.exe
-Get-FileHash dist\CodexContinue-0.5.0-win-x64.zip -Algorithm SHA256
+# Windows（安装器未签名，signtool 会报告 No signature found；用哈希校验）
+Get-FileHash dist\CodexContinue-Setup-0.5.1-unsigned.exe -Algorithm SHA256
+Get-FileHash dist\CodexContinue-0.5.1-win-x64.zip -Algorithm SHA256
 ```
 
 ```bash
 # macOS
-codesign --verify --deep --strict dist/CodexContinue-0.5.0-macOS.dmg  # dmg 本身未签，检查 app 时先挂载
-hdiutil verify dist/CodexContinue-0.5.0-macOS.dmg
-shasum -a 256 dist/CodexContinue-0.5.0-macOS.dmg
+codesign --verify --deep --strict dist/CodexContinue-0.5.1-macOS.dmg  # dmg 本身未签，检查 app 时先挂载
+hdiutil verify dist/CodexContinue-0.5.1-macOS.dmg
+shasum -a 256 dist/CodexContinue-0.5.1-macOS.dmg
 ```
 
 macOS 为 ad-hoc 签名、**未公证**：下载后首次启动需右键 → 打开，或：
@@ -101,7 +69,7 @@ xattr -dr com.apple.quarantine /Applications/CodexContinue.app
 
 ## 5. 失败处理与轮换
 
-- SignPath 审核/签名失败：workflow 失败，不发布冒充签名的产物；可先手动发布 `-unsigned.exe`。
-- 证书或 token 过期：更新 Secrets；SignPath 每年续签由基金会处理。
+- 签名步骤已从 workflow 移除；发布产物固定为未签名安装器。
+- 如果以后恢复签名：需要新增 Secrets、签名步骤与验签，并重新评估发布者信任链。
 - macOS 构建失败（交叉编译）：确认 Xcode CLT 支持 `-target x86_64-apple-macos13.0`；必要时改为在两个 runner 分别构建再合并。
 - 版本号只改 `pyproject.toml` 与 `src/codex_auto_continue/__init__.py`；`build.sh`、安装器版本都从它们派生。

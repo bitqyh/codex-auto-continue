@@ -30,13 +30,13 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 
 | 平台 | 下载 | 说明 |
 | --- | --- | --- |
-| Windows | `CodexContinue-Setup-<ver>.exe` | Inno 安装器，内嵌 Python；SignPath 审核通过、配置完成并人工批准签名后提供签名版；当前为 `-unsigned.exe` |
+| Windows | `CodexContinue-Setup-<ver>-unsigned.exe` | Inno 安装器，内嵌 Python；**未签名**（SmartScreen 可能提示未知发布者） |
 | Windows 便携 | `CodexContinue-<ver>-win-x64.zip` | 解压即用，无需安装；未签名 |
 | macOS | `CodexContinue-<ver>-macOS.dmg` | universal app，**ad-hoc 签名、未公证**；首次启动右键 → 打开 |
 
 校验：`sha256sum -c SHA256SUMS`（Windows 可用 `Get-FileHash` 对照）。
 
-> 当前 v0.5.1 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请已提交，正在等待审核；通过审核并配置仓库 Secrets 后，发布流程会提交签名请求，经维护者人工批准、签名并校验后发布（流程见 [RELEASING](docs/RELEASING.md)）。下载前请阅读下方 [Code signing policy](#code-signing-policy)。
+> 当前 v0.5.1 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请未通过，项目不再提供签名安装器；macOS 保持 ad-hoc。
 
 macOS 首次启动若被 Gatekeeper 拦截：
 
@@ -46,33 +46,14 @@ xattr -dr com.apple.quarantine /Applications/CodexContinue.app
 
 macOS app 需要系统已安装 Python 3.9+；Windows 安装器/便携包已内嵌 Python。
 
-## Code signing policy
+## 签名状态
 
-**Status (2026-10-26):** The SignPath Foundation application has been submitted and is awaiting review. Production signing is not active. The Windows installer in v0.5.1 is unsigned and has an `-unsigned.exe` suffix. Existing releases do not become signed when an application is approved.
+- **Windows**：安装器**不签名**（发布名 `CodexContinue-Setup-<ver>-unsigned.exe`）。Windows SmartScreen 可能提示“未知发布者”，选择“更多信息 → 仍要运行”即可。
+- **macOS**：ad-hoc 签名、**未公证**；首次启动右键 → 打开，或执行 `xattr -dr com.apple.quarantine /Applications/CodexContinue.app`。
+- **完整性**：每个 Release 附带 `SHA256SUMS`，用于校验文件完整性；它不是发布者签名。
+- 本项目曾申请 SignPath Foundation，未通过；仓库不再包含签名流程或 `SIGNPATH_*` Secrets 要求。
 
-Upon approval and activation, Windows installer signing will use the following providers: Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
-
-### Team roles and release approval
-
-| Role | Member | Responsibility |
-| --- | --- | --- |
-| Authors / committers | [@bitqyh](https://github.com/bitqyh) | Maintain the source code, build scripts and release workflow. |
-| Reviewers | [@bitqyh](https://github.com/bitqyh) | Review contributions from people without commit access before merging, including changes to build and signing configuration. |
-| Approvers | [@bitqyh](https://github.com/bitqyh) | Check the source revision, CI results and signing request, then manually approve each release for signing. |
-
-All team members must use multi-factor authentication for GitHub and SignPath access before production signing is enabled. Every release requires manual approval in SignPath; possession of a CI submission token does not replace that approval. These are requirements of this policy, not a statement that pending SignPath configuration has already been completed.
-
-### Signing scope and verification
-
-- Only this project's Windows installer built from a public version tag by the repository's [GitHub Actions release workflow](.github/workflows/release.yml) is eligible for submission. Locally built artifacts are not submitted for production signing.
-- The installer bundles the open-source Python runtime under its upstream license. The project's signing credentials must not be used to re-sign upstream Python executables or libraries, or separately installed Codex software.
-- Before production signing is enabled, SignPath artifact configuration must restrict the installer product name to `Codex Auto Continue` and enforce a consistent product version matching the release tag, as required by the [Foundation's conditions](https://signpath.org/terms).
-- The workflow verifies the returned installer with `signtool verify /pa` before publication. Without signing credentials it publishes an explicitly named `-unsigned.exe`; signing or verification failures must not be presented as successful signatures.
-- Portable Windows archives and their scripts are not signed by the current workflow. macOS releases use ad-hoc signing and are not notarized. `SHA256SUMS` checks file integrity; it is not a publisher signature.
-
-Official downloads are on [GitHub Releases](https://github.com/bitqyh/codex-auto-continue/releases). Signed Windows installers use a certificate issued to SignPath Foundation; the Windows publisher name will therefore be SignPath Foundation. A valid signature does not guarantee that Windows SmartScreen will display no warning.
-
-### Privacy policy
+### 数据与隐私
 
 codex-auto-continue has no project-operated analytics, advertising or telemetry endpoint. It reads local Codex rollout files, session metadata and usage caches to identify interrupted sessions and schedule work. Configuration, scheduled messages, project paths, quota caches, logs and CLI resume output are stored locally in the [application data directory](#配置). On macOS it may read an existing CodexBar cache; it does not upload that cache to the project maintainer.
 
