@@ -175,10 +175,12 @@ jobs:
           notes=$(cat <<'NOTES'
           Download the assets below:
 
-          - **Windows installer** (`CodexContinue-Setup-*.exe`) — signed via SignPath Foundation when the signing secrets are configured. If this release only has a `-unsigned.exe`, publishing happened before SignPath approval.
+          - **Windows installer** (`CodexContinue-Setup-*.exe`) — signed via SignPath Foundation after approval, configuration and manual approval of the signing request. An `-unsigned.exe` was published without production signing.
           - **Windows portable zip** (`CodexContinue-*-win-x64.zip`) — no installer needed; embedded Python; unsigned.
           - **macOS dmg** (`CodexContinue-*-macOS.dmg`) — ad-hoc signed, **not notarized**. On first launch right-click the app and choose Open (or `xattr -dr com.apple.quarantine /Applications/CodexContinue.app`). Requires Python 3.9+.
           - **SHA256SUMS** — verify downloads with `sha256sum -c SHA256SUMS`.
+
+          [Code signing policy](https://github.com/bitqyh/codex-auto-continue/blob/main/README.md#code-signing-policy) — signing status, team roles, manual release approval and privacy policy. Foundation signing requires application approval, completed configuration and manual approval of each signing request.
 
           Windows SmartScreen may still warn for a new signing certificate until reputation accumulates.
           NOTES

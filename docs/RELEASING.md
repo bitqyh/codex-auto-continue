@@ -2,9 +2,11 @@
 
 tag 推送后由 `.github/workflows/release.yml` 自动构建并发布：
 
+公开政策与隐私说明：[Code signing policy](../README.md#code-signing-policy)。SignPath Foundation 申请已提交，审核及生产签名配置尚未完成；当前 Windows 安装器仍未签名。
+
 | 产物 | 签名 | 构建方式 |
 | --- | --- | --- |
-| `CodexContinue-Setup-<ver>.exe` | SignPath Foundation（配置 secret 后） | Inno Setup，内嵌 Python |
+| `CodexContinue-Setup-<ver>.exe` | SignPath Foundation（审核通过、配置完成且每次人工批准后） | Inno Setup，内嵌 Python |
 | `CodexContinue-<ver>-win-x64.zip` | 未签名 | 便携包（嵌入 Python + 托盘） |
 | `CodexContinue-<ver>-macOS.dmg` | ad-hoc（未公证） | universal app（arm64 + x86_64） |
 | `SHA256SUMS` | — | 发布 job 生成 |
@@ -41,12 +43,13 @@ macOS 构建会把 `src/` 和 `bin/codex-continue` 嵌入 `Contents/Resources/cl
 
 ## 3. SignPath Foundation 接入（Windows 签名）
 
-1. 用 GitHub 账号在 https://signpath.org/apply 申请；项目需 MIT、公开、已发布、有文档（当前满足）。
+1. 在 https://signpath.org/apply 申请（本项目已提交，等待审核）。除公开源码、OSI 认可的许可、已发布产物与文档外，还需满足基金会的项目声誉、安全、签名政策和隐私要求；以 [官方条件](https://signpath.org/terms) 及审核结果为准。
 2. 审核通过后，在 SignPath 中：
    - 创建 Project，关联 `bitqyh/codex-auto-continue`；
    - 在 Organization 中添加 Trusted Build System **GitHub.com** 并链接 Project；
    - 安装 SignPath GitHub App（公开仓库也建议安装，便于审计）；
-   - 创建 signing policy（如 `release-signing`）；
+   - 确保所有团队成员对 GitHub 和 SignPath 访问启用 MFA；
+   - 创建 signing policy（如 `release-signing`），要求每次签名由 [Code signing policy](../README.md#code-signing-policy) 列出的 approver 人工批准，不允许 CI token 自动批准；
    - 创建 artifact configuration，用于签名安装器。`actions/upload-artifact` 默认把文件包成 zip，因此根元素用 `zip-file`（示例，字段以 SignPath 控制台为准）：
      ```xml
      <artifact-configuration xmlns="http://signpath.io/artifact-configuration">
@@ -55,6 +58,7 @@ macOS 构建会把 `src/` 和 `bin/codex-continue` 嵌入 `Contents/Resources/cl
        </zip-file>
      </artifact-configuration>
      ```
+   - 上述 XML 只说明包结构，不能作为完整的生产配置；还需按控制台支持的字段约束安装器产品名为 `Codex Auto Continue`，并保证产品版本与该次 release tag 一致。只签项目安装器，不单独重签包内的上游 Python 程序或库。
 3. 在仓库 **Settings → Secrets and variables → Actions** 添加：
 
    | Secret | 值 |
@@ -65,13 +69,14 @@ macOS 构建会把 `src/` 和 `bin/codex-continue` 嵌入 `Contents/Resources/cl
    | `SIGNPATH_SIGNING_POLICY_SLUG` | 例如 `release-signing` |
    | `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | 安装器配置的 slug |
 
-4. 之后打 tag：workflow 会先上传未签名的 `Setup.exe`，调用 `signpath/github-action-submit-signing-request@v3` 签名，再用 `signtool verify /pa` 校验，最后把签名后的 exe 放进 Release。
+4. 之后打 tag：workflow 会先上传未签名的 `Setup.exe`，调用 `signpath/github-action-submit-signing-request@v3` 提交并等待签名。维护者需核对源码 revision、CI 结果和产物来源，在 SignPath 中人工批准；签名完成后，workflow 再用 `signtool verify /pa` 校验，最后把签名后的 exe 放进 Release。审批需在 workflow 和 action 的等待时限内完成；超时失败后应检查状态再重试。
 5. `SIGNPATH_API_TOKEN` 未配置时，安装器会被重命名为 `CodexContinue-Setup-<ver>-unsigned.exe` 并照常发布（不会冒充已签名）。
 
 注意：
 - SignPath 的证书签发给 **SignPath Foundation**，安装器“发布者”显示为 SignPath Foundation，而不是个人。
 - 签名保证发布者与完整性；Windows SmartScreen 对新证书仍有信誉累积期，可能短暂提示。
-- 只签名安装器（`.exe`）；便携 zip 内的 `.cmd/.vbs/.ps1` 不适用 Authenticode。
+- 当前 workflow 只签名安装器（`.exe`），不对便携 zip 内的 `.cmd/.vbs/.ps1` 单独签名。
+- 每个发布页应包含指向 [Code signing policy](../README.md#code-signing-policy) 的链接；release workflow 的说明模板已包含此入口。已有发布页需要单独补链，不会随模板更新自动改变。
 
 ## 4. 本地校验
 
