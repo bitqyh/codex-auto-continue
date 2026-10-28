@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from .config import Config
+from .config import Config, append_log
 
 
 def _run(command: list[str], timeout: float = 10.0) -> bool:
@@ -157,6 +157,15 @@ def notify(config: Config, title: str, body: str, event: str, payload: dict[str,
         local_notify(title, body)
     if config.notify_email:
         if _email_endpoint(config):
-            email_notify(config, event, title, body)
-        else:
+            if not email_notify(config, event, title, body):
+                try:
+                    append_log(f"email notification failed (event={event}); check email_endpoint/email_secret_file")
+                except OSError:
+                    pass
+        elif getattr(config, "webhook_url", None):
             webhook_notify(config, event, payload or {"title": title, "body": body})
+        else:
+            try:
+                append_log("notify_email enabled but neither email_endpoint nor webhook_url is configured")
+            except OSError:
+                pass

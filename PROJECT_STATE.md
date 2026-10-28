@@ -7,10 +7,10 @@
 
 - **目标**：Codex 账号额度（usage limit）重置后，自动让被中断的会话继续。
 - **交付形态**：跨平台 CLI（核心，Python 标准库）＋ macOS 原生菜单栏 app ＋ Windows Task Scheduler 调度与 PowerShell 托盘。Codex 插件方向已放弃（2026-10-24 决定），marketplace/插件文件已从仓库移除。
-- **当前版本**：`0.6.0`（`src/codex_auto_continue/__init__.py`）。
+- **当前版本**：`0.6.1`（`src/codex_auto_continue/__init__.py`）。
 - **权威工作目录**：`/Users/qyh/Projects/gptwork/codex-auto-continue`（已部署，菜单栏 app 由此构建）。
 - **开发镜像**：`/Users/qyh/Documents/deepseek-harness/default-workspace/codex-auto-continue`（由权威目录 rsync 同步，排除 `.git` 与构建目录）。
-- **版本控制**：git 仓库，tag `v0.6.0`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
+- **版本控制**：git 仓库，tag `v0.6.1`，已推送 GitHub：https://github.com/bitqyh/codex-auto-continue
 - **更新时间**：2026-10-28 10:50 CST。Windows 真机验收已完整通过（2026-10-25 23:41，真实新回合成功）；发布流水线已实现（Windows Inno 安装器未签名、macOS universal app + ad-hoc dmg、Release 自动构建与校验和）；当前版本 0.5.1。SignPath Foundation 申请未通过，项目回到不签名方案。
 
 ## 2. 权威资料
@@ -119,6 +119,7 @@
   - `SHA256SUMS`；release workflow 在 windows-latest 上通过了安装器静默安装 + `codex-continue --version` 冒烟
   - 三平台 tests 全绿；`release.yml` 仅在 tag 触发，Windows 安装器由 finalize 脚本改名为 `-unsigned.exe`
 - **邮件通知接入（2026-10-28）**：复用 `codex-quota-email` 的 Cloudflare Worker，新增 `POST /auto-continue`（commit `2cb480f`，已部署到 `notify.qyhgroup.uk`，沿用同一 `AUTH_SECRET`/发件域名/固定收件人）；`codex-auto-continue` 新增 `notifications.email_endpoint`、`notifications.email_secret_file` 与 `notify-test --email`，每处理一个线程发一封（`event=thread-result`）。本机已配置并实测：本地通知 + 邮件中继均成功（2026-10-28），密钥文件 `~/Library/Application Support/CodexQuotaEmail/auth.secret`（0600）。
+- **v0.6.1（2026-10-28）**：修复“菜单栏 app 仍内嵌 0.5.0 CLI，导致配置了邮件却不发”的问题；邮件失败会写 run.log。重新构建菜单栏 app 并内嵌 0.6.1 CLI。
 - **v0.6.0 Release（2026-10-28）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.6.0 — 包含邮件中继接入；Windows 安装器仍为 `-unsigned.exe`，macOS 为 ad-hoc dmg；SHA256SUMS 已校验。
 - **v0.5.1 Release（2026-10-26）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.5.1 — 包含最终 Windows 修复（model/proxy、`--force` 等）；Windows 安装器未签名（`-unsigned.exe`），macOS 为 ad-hoc dmg。
 
