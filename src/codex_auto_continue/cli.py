@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 from . import __version__, config as cfg, messages, paths, plan, rollouts, threads, usage
 from . import runner
-from .notify import local_notify
+from .notify import email_notify, local_notify
 from .scheduler import SchedulerError, for_platform
 
 
@@ -392,6 +392,10 @@ def cmd_config(args: argparse.Namespace) -> int:
             return 2
         if key == "webhook_url":
             config.webhook_url = value or None
+        elif key == "email_endpoint":
+            config.email_endpoint = value or None
+        elif key == "email_secret_file":
+            config.email_secret_file = value or None
         elif key == "message_template":
             config.message_template = value
         elif key in (
@@ -425,6 +429,16 @@ def cmd_config(args: argparse.Namespace) -> int:
 def cmd_notify_test(args: argparse.Namespace) -> int:
     ok = local_notify("Codex Auto Continue", "本地通知测试成功 / local notification test OK")
     print("已发送本地测试通知。" if ok else "本地通知发送失败（可能需要在系统设置中允许通知）。")
+    if getattr(args, "email", False):
+        config = cfg.load_config()
+        sent = email_notify(
+            config,
+            "test",
+            "Codex Auto Continue 测试邮件",
+            "这是一封来自 codex-auto-continue 的测试邮件；收到说明邮件中继可用。",
+        )
+        print("已发送邮件测试通知。" if sent else "邮件测试发送失败（检查 email_endpoint / email_secret_file）。")
+        ok = ok and sent
     return 0 if ok else 1
 
 
@@ -499,7 +513,8 @@ def build_parser() -> argparse.ArgumentParser:
     config_cmd.add_argument("--set", help="key=value")
     config_cmd.set_defaults(func=cmd_config)
 
-    notify_cmd = sub.add_parser("notify-test", help="测试本地通知")
+    notify_cmd = sub.add_parser("notify-test", help="测试通知（默认本地，--email 同时测试邮件）")
+    notify_cmd.add_argument("--email", action="store_true", help="同时发送一封测试邮件")
     notify_cmd.set_defaults(func=cmd_notify_test)
 
     return parser

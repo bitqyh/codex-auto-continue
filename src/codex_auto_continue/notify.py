@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -61,6 +65,74 @@ def _powershell_string(value: str) -> str:
     return f"'{escaped}'"
 
 
+def _email_endpoint(config: Config) -> str | None:
+    return os.environ.get("CODEX_AUTO_CONTINUE_EMAIL_ENDPOINT") or getattr(config, "email_endpoint", None)
+
+
+def _email_secret(config: Config) -> str | None:
+    direct = os.environ.get("CODEX_AUTO_CONTINUE_EMAIL_SECRET")
+    if direct:
+        return direct if len(direct) >= 32 else None
+    path = os.environ.get("CODEX_AUTO_CONTINUE_EMAIL_SECRET_FILE") or getattr(config, "email_secret_file", None)
+    if not path:
+        return None
+    try:
+        path = os.path.expanduser(path)
+        if os.name != "nt" and os.stat(path).st_mode & 0o077:
+            return None
+        with open(path, encoding="utf-8") as handle:
+            secret = handle.read().strip()
+    except OSError:
+        return None
+    return secret if len(secret) >= 32 else None
+
+
+def email_notify(config: Config, event: str, title: str, body: str) -> bool:
+    """POST a notification to the email relay (Cloudflare Worker in this setup)."""
+    endpoint = _email_endpoint(config)
+    secret = _email_secret(config)
+    if not endpoint or not secret:
+        return False
+    parsed = urllib.parse.urlsplit(endpoint)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query:
+        return False
+
+    event_id = hashlib.sha256(
+        f"{event}\0{title}\0{body}\0{time.time_ns()}".encode("utf-8")
+    ).hexdigest()
+    data = json.dumps(
+        {
+            "event_id": event_id,
+            "event": event,
+            "title": title[:200],
+            "body": body[:4000],
+            "observed_at": int(time.time()),
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + secret,
+            "User-Agent": "codex-auto-continue/0.6.0",
+        },
+        method="POST",
+    )
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):  # noqa: ANN002,ANN003
+            return None
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler(), _NoRedirect())
+    try:
+        with opener.open(request, timeout=10) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+        return False
+
+
 def webhook_notify(config: Config, event: str, payload: dict[str, Any]) -> bool:
     """Optional generic webhook (mail relay, ntfy, Slack, ...). Disabled by default."""
     url = os.environ.get("CODEX_AUTO_CONTINUE_WEBHOOK") or getattr(config, "webhook_url", None)
@@ -84,4 +156,7 @@ def notify(config: Config, title: str, body: str, event: str, payload: dict[str,
     if config.notify_local:
         local_notify(title, body)
     if config.notify_email:
-        webhook_notify(config, event, payload or {"title": title, "body": body})
+        if _email_endpoint(config):
+            email_notify(config, event, title, body)
+        else:
+            webhook_notify(config, event, payload or {"title": title, "body": body})

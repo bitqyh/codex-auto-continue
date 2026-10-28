@@ -36,7 +36,7 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 
 校验：`sha256sum -c SHA256SUMS`（Windows 可用 `Get-FileHash` 对照）。
 
-> 当前 v0.5.1 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请未通过，项目不再提供签名安装器；macOS 保持 ad-hoc。
+> 当前 v0.6.0 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请未通过，项目不再提供签名安装器；macOS 保持 ad-hoc。
 
 macOS 首次启动若被 Gatekeeper 拦截：
 
@@ -126,7 +126,7 @@ codex-continue disarm --all
 | `run [--dry-run] [--json]` | 执行一次续跑；`--dry-run` 只读预览，不写状态、日志、缓存或调度 |
 | `install` / `uninstall` | 按当前状态安装/移除平台定时任务 |
 | `config [--set key=value]` | 查看/修改配置 |
-| `notify-test` | 测试本地通知 |
+| `notify-test [--email]` | 测试本地通知；`--email` 同时测试邮件中继 |
 
 ## 配置
 
@@ -147,7 +147,9 @@ codex-continue disarm --all
 | `queue_verify_seconds` | 120 | 等待 App 出现新回合的上限 |
 | `quota_cache_seconds` | 300 | 额度查询缓存秒数（`status/usage` 默认走缓存，`--refresh` 强制刷新） |
 | `notifications.local` | true | macOS / Windows / Linux 本地通知 |
-| `notifications.email` | false | 启用 webhook 通知（见下） |
+| `notifications.email` | false | 启用邮件/Webhook 通知（见下） |
+| `notifications.email_endpoint` | null | 邮件中继 HTTPS 地址（如 Cloudflare Worker `/auto-continue`） |
+| `notifications.email_secret_file` | null | 中继 Bearer 密钥文件路径，需 0600 |
 | `webhook_url` | null | 通用 webhook 地址，POST JSON |
 | `codex_path` | null | 自定义 codex 可执行文件路径 |
 | `project_templates` | {} | 按项目目录保存的续跑消息模板，由 `template` 命令维护 |
@@ -156,19 +158,33 @@ codex-continue disarm --all
 
 ## 通知与邮件（可选）
 
-默认只发本地通知，不依赖任何服务。想要邮件/手机通知时，把 `config --set notify_email=true --set webhook_url=https://...` 指向任意接收 JSON 的端点即可，runner 会 POST：
+默认只发本地系统通知。邮件支持两种接入方式：
 
-```json
-{"event": "thread-result", "thread_id": "…", "ok": true, "detail": "…"}
+### 1. 复用现有邮件中继（Cloudflare Worker）
+
+适合已经有发件域名/Worker 的部署（本仓库作者复用 `codex-quota-email` 的 Worker，新增 `/auto-continue` 路由）。客户端只 POST JSON，不在仓库保存任何密钥：
+
+```bash
+codex-continue config --set notify_email=true \
+  --set email_endpoint=https://notify.qyhgroup.uk/auto-continue \
+  --set email_secret_file="$HOME/Library/Application Support/CodexQuotaEmail/secret"
+
+codex-continue notify-test --email
 ```
 
-常见的三种落地方式：
+- 中继校验 `Authorization: Bearer <secret>`，发到 Worker 里配置的固定收件人；端点与密钥只在本机。
+- 密钥文件必须为 `0600`；endpoint 必须是 HTTPS、无查询参数、不跟随重定向，超时 10 秒。
+- 每处理一个线程发送一封（事件 `thread-result`），payload 形如：
+  ```json
+  {"event_id":"<sha256>","event":"thread-result","title":"Codex 已恢复续跑","body":"<thread>: <detail>","observed_at":1791873322}
+  ```
+- 邮件中继不可用时只记日志，不会中断续跑。
 
-1. **Cloudflare Worker + 邮件 API**（本仓库作者使用的方案）：Worker 校验固定共享密钥后调用邮件服务，客户端只 POST 事件 JSON。适合长期常驻的服务器。
-2. **ntfy / Telegram Bot / Bark**：把 `webhook_url` 指向对应 HTTP API，事件 JSON 会被原样转发。
-3. **邮件客户端脚本**：本地用 `msmtp`/`sendmail` 包装一个 HTTP 服务，或直接用 `launchd` 定时跑 `mail`。
+### 2. 通用 Webhook
 
-基础版故意不内置 SMTP 配置：把邮件服务凭据留在用户自己的部署里，仓库里不保存任何密钥。
+未配置 `email_endpoint` 时，`notifications.email=true` 仍走原来的 `webhook_url`（ntfy / Telegram Bot / Bark 等），payload 为 `{"event": ..., ...}`，由接收端自行处理。
+
+SMTP 凭据不进入本仓库；需要直连 SMTP 时请自行在部署侧包装 HTTP 服务。
 
 ## 工作原理与边界
 

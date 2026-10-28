@@ -71,6 +71,8 @@ class Config:
     notify_local: bool = True
     notify_email: bool = False
     webhook_url: str | None = None
+    email_endpoint: str | None = None
+    email_secret_file: str | None = None
     codex_path: str | None = None
     model: str | None = None
     proxy: str | None = None
@@ -88,6 +90,8 @@ class Config:
             "notifications": {
                 "local": self.notify_local,
                 "email": self.notify_email,
+                "email_endpoint": self.email_endpoint,
+                "email_secret_file": self.email_secret_file,
             },
             "webhook_url": self.webhook_url,
             "codex_path": self.codex_path,
@@ -110,6 +114,8 @@ class Config:
             notify_local=bool(notifications.get("local", True)),
             notify_email=bool(notifications.get("email", False)),
             webhook_url=raw.get("webhook_url"),
+            email_endpoint=notifications.get("email_endpoint") or raw.get("email_endpoint"),
+            email_secret_file=notifications.get("email_secret_file") or raw.get("email_secret_file"),
             codex_path=raw.get("codex_path"),
             model=raw.get("model"),
             proxy=raw.get("proxy"),
