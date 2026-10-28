@@ -119,7 +119,7 @@
   - `SHA256SUMS`；release workflow 在 windows-latest 上通过了安装器静默安装 + `codex-continue --version` 冒烟
   - 三平台 tests 全绿；`release.yml` 仅在 tag 触发，Windows 安装器由 finalize 脚本改名为 `-unsigned.exe`
 - **邮件通知接入（2026-10-28）**：复用 `codex-quota-email` 的 Cloudflare Worker，新增 `POST /auto-continue`（commit `2cb480f`，已部署到 `notify.qyhgroup.uk`，沿用同一 `AUTH_SECRET`/发件域名/固定收件人）；`codex-auto-continue` 新增 `notifications.email_endpoint`、`notifications.email_secret_file` 与 `notify-test --email`，每处理一个线程发一封（`event=thread-result`）。本机已配置并实测：本地通知 + 邮件中继均成功（2026-10-28），密钥文件 `~/Library/Application Support/CodexQuotaEmail/auth.secret`（0600）。
-- **v0.6.1（2026-10-28）**：修复“菜单栏 app 仍内嵌 0.5.0 CLI，导致配置了邮件却不发”的问题；邮件失败会写 run.log。重新构建菜单栏 app 并内嵌 0.6.1 CLI。
+- **v0.6.1 Release（2026-10-28）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.6.1 — 修复“菜单栏 app 仍内嵌 0.5.0 CLI，导致配置了邮件却不发”的问题（14:03 那次续跑即旧 CLI 执行）；邮件失败会写 run.log。已重新构建并安装菜单栏 app（内嵌 0.6.1 CLI），embedded `notify-test --email` 与模拟 thread-result 通知均成功。
 - **v0.6.0 Release（2026-10-28）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.6.0 — 包含邮件中继接入；Windows 安装器仍为 `-unsigned.exe`，macOS 为 ad-hoc dmg；SHA256SUMS 已校验。
 - **v0.5.1 Release（2026-10-26）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.5.1 — 包含最终 Windows 修复（model/proxy、`--force` 等）；Windows 安装器未签名（`-unsigned.exe`），macOS 为 ad-hoc dmg。
 
