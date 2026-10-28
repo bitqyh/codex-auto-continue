@@ -39,7 +39,13 @@ def cmd_scan(args: argparse.Namespace) -> int:
     infos = rollouts.scan(days=args.days, include_subagents=args.include_subagents)
     interrupted = [info for info in infos if info.interrupted]
     if args.json:
-        _json_dump({"scanned": len(infos), "interrupted": [info.to_dict() for info in interrupted]})
+        _json_dump(
+            {
+                "scanned": len(infos),
+                "interrupted": [info.to_dict() for info in interrupted],
+                "recent": [info.to_dict() for info in infos[:6]],
+            }
+        )
         return 0
     if not interrupted:
         print(f"扫描了 {len(infos)} 个会话（最近 {args.days} 天），没有因额度中断的。")

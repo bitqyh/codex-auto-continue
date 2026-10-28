@@ -20,6 +20,15 @@ struct InterruptedThread {
     let ageText: String
 }
 
+struct RecentThread {
+    let threadID: String
+    let title: String?
+    let cwd: String
+    let lastUserText: String
+    let ageText: String
+    let interrupted: Bool
+}
+
 struct RegisteredThread {
     let threadID: String
     let title: String?
@@ -37,6 +46,7 @@ struct Snapshot {
     var schedulerText = "调度器：—"
     var dataDir: String = ""
     var interrupted: [InterruptedThread] = []
+    var recent: [RecentThread] = []
     var registered: [RegisteredThread] = []
     var error: String?
 }
@@ -305,6 +315,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let data = scanJSON?.data(using: .utf8),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let recent = root["recent"] as? [[String: Any]] {
+            for item in recent {
+                let cwd = item["cwd"] as? String ?? ""
+                snap.recent.append(
+                    RecentThread(
+                        threadID: item["thread_id"] as? String ?? "",
+                        title: item["title"] as? String,
+                        cwd: (cwd as NSString).lastPathComponent,
+                        lastUserText: self.flatten(item["last_user_text"] as? String ?? ""),
+                        ageText: self.ageText((item["mtime"] as? Double) ?? 0),
+                        interrupted: item["interrupted"] as? Bool ?? false
+                    )
+                )
+            }
+        }
+        if let data = scanJSON?.data(using: .utf8),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let interrupted = root["interrupted"] as? [[String: Any]] {
             for item in interrupted {
                 let cwd = item["cwd"] as? String ?? ""
@@ -412,6 +439,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menu.addItem(item)
             }
 
+            // Recent non-interrupted sessions (latest six overall, interrupted excluded)
+            let otherRecent = Array(snapshot.recent.filter { !$0.interrupted }.prefix(6))
+            menu.addItem(.separator())
+            let recentHeader = NSMenuItem(
+                title: "最近其他对话：\(otherRecent.count)",
+                action: nil,
+                keyEquivalent: ""
+            )
+            recentHeader.isEnabled = false
+            menu.addItem(recentHeader)
+            if otherRecent.isEmpty {
+                let empty = NSMenuItem(title: "  无", action: nil, keyEquivalent: "")
+                empty.isEnabled = false
+                menu.addItem(empty)
+            }
+            for thread in otherRecent {
+                let label = thread.title ?? thread.cwd
+                let item = NSMenuItem(title: "  \(label) · \(thread.ageText)", action: nil, keyEquivalent: "")
+                item.toolTip = "\(thread.title ?? "")\n\(thread.cwd)\n最后一句：\(thread.lastUserText)\n线程：\(thread.threadID)\n（非中断会话，将强制安排续跑）"
+                let submenu = NSMenu()
+                let armDefault = NSMenuItem(
+                    title: "安排续跑",
+                    action: #selector(armForcedWithDefaultMessage(_:)),
+                    keyEquivalent: ""
+                )
+                armDefault.target = self
+                armDefault.representedObject = thread.threadID
+                submenu.addItem(armDefault)
+                let armCustom = NSMenuItem(
+                    title: "自定义消息…",
+                    action: #selector(armForcedWithCustomMessage(_:)),
+                    keyEquivalent: ""
+                )
+                armCustom.target = self
+                armCustom.representedObject = thread.threadID
+                submenu.addItem(armCustom)
+                item.submenu = submenu
+                menu.addItem(item)
+            }
+
             // Registered
             if !snapshot.registered.isEmpty {
                 menu.addItem(.separator())
@@ -504,6 +571,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let threadID = sender.representedObject as? String, let cli = currentCLI() else { return }
         CLI.run(cli, ["arm", threadID, "--json"]) { _, error in
             self.showResult(error == nil, error ?? "已安排续跑")
+            self.refresh()
+        }
+    }
+
+    @objc private func armForcedWithDefaultMessage(_ sender: NSMenuItem) {
+        guard let threadID = sender.representedObject as? String, let cli = currentCLI() else { return }
+        CLI.run(cli, ["arm", threadID, "--force", "--json"]) { _, error in
+            self.showResult(error == nil, error ?? "已安排续跑（非中断会话）")
+            self.refresh()
+        }
+    }
+
+    @objc private func armForcedWithCustomMessage(_ sender: NSMenuItem) {
+        guard let threadID = sender.representedObject as? String, let cli = currentCLI() else { return }
+        guard let message = promptMessage(defaultText: "请继续这个对话未完成的工作，完成后简要汇报结果与未完成项；不要重复已完成的部分。") else {
+            return
+        }
+        CLI.run(cli, ["arm", threadID, "--message", message, "--force", "--json"]) { _, error in
+            self.showResult(error == nil, error ?? "已安排续跑（非中断会话）")
             self.refresh()
         }
     }
