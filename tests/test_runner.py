@@ -320,3 +320,41 @@ class RunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_preflight_failure_keeps_armed_without_attempt(self) -> None:
+        self.config.proxy = "http://127.0.0.1:7897"
+        thread = self._thread()
+        with mock.patch.object(runner, "_network_preflight", return_value=(False, "network preflight failed: timed out")):
+            outcome = runner.continue_thread(thread, self.config, str(self.fake))
+        self.assertFalse(outcome["ok"])
+        self.assertTrue(outcome["transient"])
+        self.assertEqual(thread.status, cfg.STATUS_ARMED)
+        self.assertEqual(thread.attempts, 0)
+
+    def test_transient_send_failure_does_not_consume_attempt(self) -> None:
+        thread = self._thread()
+        with mock.patch.object(runner, "_send_via_queue", return_value=(False, "queue failed (exit 1): timed out")), \
+             mock.patch.object(runner, "_send_via_resume", return_value=(False, "resume failed (exit 1): connection reset")):
+            outcome = runner.continue_thread(thread, self.config, str(self.fake))
+        self.assertFalse(outcome["ok"])
+        self.assertTrue(outcome["transient"])
+        self.assertEqual(thread.status, cfg.STATUS_ARMED)
+        self.assertEqual(thread.attempts, 0)
+
+    def test_refresh_schedule_moves_ready_threads_to_near_future(self) -> None:
+        thread = self._thread()
+        thread.status = cfg.STATUS_ARMED
+        state = cfg.State(threads={thread.thread_id: thread})
+        snapshot = mock.Mock(has_capacity=True)
+        scheduler = mock.Mock()
+        now = dt.datetime.now(dt.timezone.utc)
+        fire = runner.refresh_schedule(state, self.config, snapshot, scheduler, now=now)
+        self.assertIsNotNone(fire)
+        self.assertLess(abs((fire - now).total_seconds() - 15), 2)
+        self.assertEqual(thread.fire_at, cfg.iso(fire))
+        scheduler.install_interval.assert_called_once()
+
+    def test_transient_classifier(self) -> None:
+        self.assertTrue(runner._is_transient_error("resume failed: connection reset by peer"))
+        self.assertTrue(runner._is_transient_error("queue failed: timed out"))
+        self.assertFalse(runner._is_transient_error("active writer"))

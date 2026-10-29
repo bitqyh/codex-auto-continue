@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -94,7 +96,15 @@ def refresh_schedule(
     argv, env, workdir = _schedule_parts()
     ready_now = snapshot is not None and snapshot.has_capacity
     fire_at: dt.datetime | None = None
-    if not ready_now:
+    if ready_now:
+        # Quota is available: make every pending thread due immediately. Leaving
+        # an old future fire_at here caused runs to refresh the scheduler every
+        # minute without ever attempting a continuation.
+        base = plan.aware(now) or dt.datetime.now(dt.timezone.utc)
+        fire_at = base + dt.timedelta(seconds=15)
+        for thread in pending:
+            thread.fire_at = cfg.iso(fire_at)
+    else:
         fire_at = plan.compute_fire_at(pending, snapshot, config, now=now)
         for thread in pending:
             thread.fire_at = cfg.iso(fire_at)
@@ -124,6 +134,53 @@ def _safe_cwd(cwd: str | None) -> str | None:
         pass
     home = Path.home()
     return str(home) if home.is_dir() else None
+
+
+_TRANSIENT_MARKERS = (
+    "timed out",
+    "timeout",
+    "connection reset",
+    "connection refused",
+    "econnreset",
+    "econnrefused",
+    "temporary failure",
+    "network is unreachable",
+    "no route to host",
+    "tls",
+    "proxy",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "502",
+    "503",
+    "504",
+)
+
+
+def _is_transient_error(detail: str) -> bool:
+    text = (detail or "").lower()
+    return any(marker in text for marker in _TRANSIENT_MARKERS)
+
+
+def _network_preflight(proxy: str | None, timeout: float = 8.0) -> tuple[bool, str]:
+    """Quick proxy reachability check before spending an attempt.
+
+    Any HTTP response (including 401/403) means the network path works; only
+    DNS/connect/TLS timeouts are treated as a transient outage.
+    """
+    if not proxy:
+        return True, "no proxy configured"
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+    )
+    request = urllib.request.Request("https://chatgpt.com/", method="HEAD")
+    try:
+        with opener.open(request, timeout=timeout):
+            return True, "ok"
+    except urllib.error.HTTPError:
+        return True, "reachable (http error)"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return False, f"network preflight failed via {proxy}: {exc}"
 
 
 def _env_with_proxy(proxy: str | None) -> dict[str, str] | None:
@@ -298,9 +355,16 @@ def continue_thread(
     if dry_run:
         return {"thread_id": thread.thread_id, "ok": True, "detail": f"dry-run: would queue '{message}'"}
 
+    if config.proxy:
+        reachable, reason = _network_preflight(config.proxy)
+        if not reachable:
+            thread.status = cfg.STATUS_ARMED
+            thread.last_error = reason
+            return {"thread_id": thread.thread_id, "ok": False, "transient": True, "detail": reason}
+
     thread.status = cfg.STATUS_RUNNING
     thread.attempts += 1
-    ok, detail = _send_via_queue(codex_path, thread, message, config.queue_verify_seconds)
+    ok, detail = _send_via_queue(codex_path, thread, message, config.queue_verify_seconds, config.proxy)
     if not ok:
         cfg.append_log(f"queue path failed for {thread.thread_id}: {detail}; trying resume")
         ok, detail = _send_via_resume(codex_path, thread, message, config.model, config.proxy)
@@ -310,6 +374,12 @@ def continue_thread(
         thread.last_error = None
     else:
         thread.last_error = detail
+        if _is_transient_error(detail):
+            # Network/proxy outage: do not burn the retry budget, keep it armed
+            # and let the scheduler try again shortly.
+            thread.attempts = max(thread.attempts - 1, 0)
+            thread.status = cfg.STATUS_ARMED
+            return {"thread_id": thread.thread_id, "ok": False, "transient": True, "detail": detail}
         if thread.attempts >= max(config.max_attempts, 1):
             thread.status = cfg.STATUS_FAILED
         else:
@@ -424,7 +494,7 @@ def _run_locked(
             summary["processed"].append(outcome)
             label = threads.thread_title(thread.thread_id) or thread.thread_id
             cfg.append_log(f"thread {label} ({outcome['thread_id']}): {outcome['detail']}")
-            if notify_results and not dry_run:
+            if notify_results and not dry_run and not outcome.get("transient"):
                 title = "Codex 已恢复续跑" if outcome["ok"] else "Codex 续跑失败"
                 notify(config, title, f"{outcome['thread_id']}: {outcome['detail']}", "thread-result", outcome)
 

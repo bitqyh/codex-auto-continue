@@ -36,7 +36,7 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 
 校验：`sha256sum -c SHA256SUMS`（Windows 可用 `Get-FileHash` 对照）。
 
-> 当前 v0.7.0 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请未通过，项目不再提供签名安装器；macOS 保持 ad-hoc。
+> 当前 v0.7.1 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请未通过，项目不再提供签名安装器；macOS 保持 ad-hoc。
 
 macOS 首次启动若被 Gatekeeper 拦截：
 
@@ -323,6 +323,24 @@ ui\windows-tray\CodexContinueTray.vbs
 已知限制：计划任务只在用户登录时运行；关机期间错过的任务不会补跑（与 macOS 设计一致）。
 
 真机验收清单与诊断脚本：`docs/WINDOWS-TESTING.md`、`scripts/windows-diagnostics.ps1`。
+
+## 网络与代理（定时续跑）
+
+如果 Codex 需要走本机代理（Clash/mihomo 等），**必须把代理写进配置**：launchd 启动的 runner 不会继承终端的 `HTTPS_PROXY`。
+
+```bash
+codex-continue config --set proxy=http://127.0.0.1:7897
+```
+
+runner 会把 `HTTP_PROXY`/`HTTPS_PROXY` 注入额度查询、`codex queue` 与 `codex exec resume`。
+
+为避免“到点时代理节点刚好超时”导致失败：
+
+- 每次尝试前先做 8 秒代理预检（`https://chatgpt.com/`，任何 HTTP 响应都算网络可达）；不可达就**不消耗重试次数**，约 60 秒后再试
+- `queue`/`resume` 返回 timeout、connection reset、502/503/504 等网络类错误时同样保留 `armed` 状态、不累计 `max_attempts`，也不会重复发失败邮件
+- 额度已恢复时会强制把 `fire_at` 推进到 15 秒后，避免“额度已恢复但 fire_at 停在未来、每分钟只刷新不执行”
+
+建议 Clash 使用 `url-test` / `fallback` 组并开启健康检查；本工具只负责重试，不负责切换节点。
 
 ## 睡眠处理
 
