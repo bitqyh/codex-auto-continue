@@ -119,7 +119,7 @@
   - `SHA256SUMS`；release workflow 在 windows-latest 上通过了安装器静默安装 + `codex-continue --version` 冒烟
   - 三平台 tests 全绿；`release.yml` 仅在 tag 触发，Windows 安装器由 finalize 脚本改名为 `-unsigned.exe`
 - **邮件通知接入（2026-10-28）**：复用 `codex-quota-email` 的 Cloudflare Worker，新增 `POST /auto-continue`（commit `2cb480f`，已部署到 `notify.qyhgroup.uk`，沿用同一 `AUTH_SECRET`/发件域名/固定收件人）；`codex-auto-continue` 新增 `notifications.email_endpoint`、`notifications.email_secret_file` 与 `notify-test --email`，每处理一个线程发一封（`event=thread-result`）。本机已配置并实测：本地通知 + 邮件中继均成功（2026-10-28），密钥文件 `~/Library/Application Support/CodexQuotaEmail/auth.secret`（0600）。
-- **v0.7.2（2026-10-30）**：修复菜单栏 app 的 CLI 调用无超时导致 `refreshing` 永久卡住、菜单长期显示旧数据（看不到新的中断会话）；status/scan 加 20/25 秒超时 + 45 秒刷新看门狗，超时会杀子进程并恢复刷新。
+- **v0.7.2 Release（2026-10-30）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.7.2 — ：修复菜单栏 app 的 CLI 调用无超时导致 `refreshing` 永久卡住、菜单长期显示旧数据（看不到新的中断会话）；status/scan 加 20/25 秒超时 + 45 秒刷新看门狗，超时会杀子进程并恢复刷新。
 - **v0.7.1 Release（2026-10-29）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.7.1 — ：修复“额度已恢复但 fire_at 停在未来，runner 每分钟只刷新不执行”的调度 bug；新增代理预检（8s，失败不消耗 attempts）、网络类失败保留 armed 且不发失败邮件；本机已设置 `proxy=http://127.0.0.1:7897`。
 - **v0.7.0 Release（2026-10-28）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.7.0 — 菜单栏新增「最近其他对话（最多 6 个，排除已中断）」；`scan --json` 增加 `recent`（最近 6 个会话）；已重新构建/安装菜单栏 app 0.7.0。
 - **v0.6.1 Release（2026-10-28）**：https://github.com/bitqyh/codex-auto-continue/releases/tag/v0.6.1 — 修复“菜单栏 app 仍内嵌 0.5.0 CLI，导致配置了邮件却不发”的问题（14:03 那次续跑即旧 CLI 执行）；邮件失败会写 run.log。已重新构建并安装菜单栏 app（内嵌 0.6.1 CLI），embedded `notify-test --email` 与模拟 thread-result 通知均成功。
