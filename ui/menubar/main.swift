@@ -473,26 +473,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 menu.addItem(item)
             }
 
-            // Recent non-interrupted sessions (latest six overall, interrupted excluded)
+            // Recent non-interrupted sessions: one compact submenu entry so the
+            // top-level menu stays as short as before (v0.7.0 expanded all six).
             let otherRecent = Array(snapshot.recent.filter { !$0.interrupted }.prefix(6))
             menu.addItem(.separator())
-            let recentHeader = NSMenuItem(
+            let recentEntry = NSMenuItem(
                 title: "最近其他对话：\(otherRecent.count)",
                 action: nil,
                 keyEquivalent: ""
             )
-            recentHeader.isEnabled = false
-            menu.addItem(recentHeader)
+            let recentSubmenu = NSMenu()
             if otherRecent.isEmpty {
-                let empty = NSMenuItem(title: "  无", action: nil, keyEquivalent: "")
+                let empty = NSMenuItem(title: "无", action: nil, keyEquivalent: "")
                 empty.isEnabled = false
-                menu.addItem(empty)
+                recentSubmenu.addItem(empty)
             }
             for thread in otherRecent {
                 let label = thread.title ?? thread.cwd
-                let item = NSMenuItem(title: "  \(label) · \(thread.ageText)", action: nil, keyEquivalent: "")
+                let item = NSMenuItem(title: "\(label) · \(thread.ageText)", action: nil, keyEquivalent: "")
                 item.toolTip = "\(thread.title ?? "")\n\(thread.cwd)\n最后一句：\(thread.lastUserText)\n线程：\(thread.threadID)\n（非中断会话，将强制安排续跑）"
-                let submenu = NSMenu()
+                let actions = NSMenu()
                 let armDefault = NSMenuItem(
                     title: "安排续跑",
                     action: #selector(armForcedWithDefaultMessage(_:)),
@@ -500,7 +500,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 )
                 armDefault.target = self
                 armDefault.representedObject = thread.threadID
-                submenu.addItem(armDefault)
+                actions.addItem(armDefault)
                 let armCustom = NSMenuItem(
                     title: "自定义消息…",
                     action: #selector(armForcedWithCustomMessage(_:)),
@@ -508,10 +508,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 )
                 armCustom.target = self
                 armCustom.representedObject = thread.threadID
-                submenu.addItem(armCustom)
-                item.submenu = submenu
-                menu.addItem(item)
+                actions.addItem(armCustom)
+                item.submenu = actions
+                recentSubmenu.addItem(item)
             }
+            recentEntry.submenu = recentSubmenu
+            menu.addItem(recentEntry)
 
             // Registered
             if !snapshot.registered.isEmpty {
