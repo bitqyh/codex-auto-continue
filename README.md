@@ -36,7 +36,7 @@ scan ──► arm <thread> ──► launchd (resetsAt + grace) ──► run
 
 校验：`sha256sum -c SHA256SUMS`（Windows 可用 `Get-FileHash` 对照）。
 
-> 当前 v0.7.1 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请未通过，项目不再提供签名安装器；macOS 保持 ad-hoc。
+> 当前 v0.7.2 Release 的 Windows 安装器为 `-unsigned.exe`。SignPath Foundation 申请未通过，项目不再提供签名安装器；macOS 保持 ad-hoc。
 
 macOS 首次启动若被 Gatekeeper 拦截：
 

@@ -1,3 +1,3 @@
 """Automatically resume interrupted Codex sessions after usage limits reset."""
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"

@@ -114,7 +114,8 @@ final class CLI {
         }
     }
 
-    static func run(_ path: String, _ args: [String], completion: @escaping (String?, String?) -> Void) {
+    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 30,
+                    completion: @escaping (String?, String?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: path)
@@ -123,22 +124,47 @@ final class CLI {
             let err = Pipe()
             process.standardOutput = out
             process.standardError = err
+
+            let lock = NSLock()
+            var finished = false
+            func finish(_ stdout: String?, _ stderr: String?) {
+                lock.lock()
+                if finished { lock.unlock(); return }
+                finished = true
+                lock.unlock()
+                DispatchQueue.main.async { completion(stdout, stderr) }
+            }
+
+            // A hung status/scan (e.g. quota lookup through a dead proxy) used
+            // to leave `refreshing` true forever, freezing the menu on stale
+            // data. Kill the child and always deliver a completion.
+            let watchdog = DispatchWorkItem {
+                if process.isRunning {
+                    process.terminate()
+                    let pid = process.processIdentifier
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                        if process.isRunning { kill(pid, SIGKILL) }
+                    }
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+
             do {
                 try process.run()
                 process.waitUntilExit()
+                watchdog.cancel()
                 let outData = out.fileHandleForReading.readDataToEndOfFile()
                 let errData = err.fileHandleForReading.readDataToEndOfFile()
                 let stdout = String(data: outData, encoding: .utf8) ?? ""
                 let stderr = String(data: errData, encoding: .utf8) ?? ""
-                DispatchQueue.main.async {
-                    if process.terminationStatus == 0 {
-                        completion(stdout, nil)
-                    } else {
-                        completion(stdout, stderr.isEmpty ? "exit \(process.terminationStatus)" : stderr)
-                    }
+                if process.terminationStatus == 0 {
+                    finish(stdout, nil)
+                } else {
+                    finish(stdout, stderr.isEmpty ? "exit \(process.terminationStatus)" : stderr)
                 }
             } catch {
-                DispatchQueue.main.async { completion(nil, error.localizedDescription) }
+                watchdog.cancel()
+                finish(nil, error.localizedDescription)
             }
         }
     }
@@ -251,14 +277,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var scanOut: String?
         var cliError: String?
 
+        // Belt and braces: even if a completion is lost, never stay frozen.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45) { [weak self] in
+            guard let self, self.refreshing else { return }
+            self.refreshing = false
+            self.snapshot.error = "刷新超时（CLI 无响应）"
+            self.render()
+        }
+
         group.enter()
-        CLI.run(cli, ["status", "--json"]) { out, err in
+        CLI.run(cli, ["status", "--json"], timeout: 20) { out, err in
             statusOut = out
             if let err = err { cliError = err }
             group.leave()
         }
         group.enter()
-        CLI.run(cli, ["scan", "--days", "14", "--json"]) { out, _ in
+        CLI.run(cli, ["scan", "--days", "14", "--json"], timeout: 25) { out, _ in
             scanOut = out
             group.leave()
         }
